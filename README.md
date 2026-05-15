@@ -1,3 +1,4 @@
+Markdown
 # 🥗 AI Nutrition Assistant
 
 A full-stack, AI-powered web application that allows users to ask complex nutritional questions, search for foods, and visualize dietary data. The app leverages a React frontend and a Python FastAPI backend powered by Google's Vertex AI and BigQuery.
@@ -33,3 +34,37 @@ Nutrition_AI/
     ├── agents.py           # LangGraph workflow and Vertex AI integration
     ├── requirements.txt    # Python dependencies
     └── Dockerfile          # Cloud Run containerization instructions
+```
+
+### 🚀 Local Development Setup
+
+To run this application locally, you will need to open two separate terminal windows.
+
+#### 1. Start the Backend
+
+Navigate to the backend directory, set up your Python environment, and start the Uvicorn server:
+
+```Bash
+cd backend
+
+# Create and activate your virtual environment (recommended)
+pip install -r requirements.txt
+
+# Create a .env file with your GCP credentials (GCP_PROJECT_ID, LOCATION, etc.)
+uvicorn main:app --reload --port 8000
+```
+
+#### 2. Start the Frontend
+Navigate to the frontend directory, install the Node modules, and start the Vite development server:
+
+```Bash
+cd frontend
+npm install
+npm run dev
+```
+
+### ☁️ Cloud Deployment
+
+Backend: Deployed to Google Cloud Run using the provided Dockerfile. Ensure the service account has the Vertex AI User, BigQuery User, and BigQuery Data Viewer IAM roles.
+
+Frontend: Deployed to Vercel with the Root Directory configured to /frontend.
