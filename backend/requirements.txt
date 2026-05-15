@@ -1,0 +1,12 @@
+# ============================================
+# LIBRARIES REQUIRED FOR THE APP
+# ============================================
+fastapi
+uvicorn
+langchain-google-vertexai
+langgraph
+google-cloud-bigquery
+pandas
+python-dotenv
+db-dtypes
+plotly
