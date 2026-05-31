@@ -20,6 +20,7 @@ import json
 import re
 from prompt_librarian import get_librarian_prompt
 from prompt_visual import VISUAL_CONTEXT
+from prompt_summary import get_summary_prompt
 
 # ============================================
 # 2. MAP NUTRIENTS
@@ -203,10 +204,7 @@ bq_client = bigquery.Client(project=PROJECT_ID)
 # ============================================
 # Define LangGraph State 
 class State(TypedDict):
-    query: str
-    food_type_filter: str 
-    diet_type_filter: str  
-    size_filter: str       
+    query: str  
     is_daily_log: bool    
     user_profile: dict     
     totals: pd.DataFrame   
@@ -215,6 +213,7 @@ class State(TypedDict):
     error: Optional[str]
     visual_type: Any
     fig: Any # Plotly figure or metric string
+    summary: str
 
 # ============================================
 #  7. LIBRARIAN NODE
@@ -222,13 +221,8 @@ class State(TypedDict):
 def librarian_node(state: State):
     """Generates SQL query from user input."""
 
-    # Extract the filter from the state (default to "All" if missing)
-    current_food_filter = state.get("food_type_filter", "All")      # Extract food filter
-    current_diet_filter = state.get("diet_type_filter", "All")     # Extract diet filter
-    current_size_filter = state.get("size_filter", "By portion")   # Extract size filter
-
-    # Pass filters to the prompt
-    sys_prompt = get_librarian_prompt(current_food_filter, current_diet_filter, current_size_filter) 
+    # Call the prompt function directly
+    sys_prompt = get_librarian_prompt() 
     
     messages = [
         SystemMessage(content=sys_prompt),
@@ -940,15 +934,45 @@ def visualizer_node(state: State):
                 
                 final_types.append("table")
                 final_figs.append(df_clean)
+        
+        # ====================================================
+        # AI SUMMARY GENERATOR 
+        # ====================================================
+        ai_summary = "Here is the result." # Default fallback
+        
+        try:
+            if not df.empty:
+                # Convert a small slice of the data to a simple text format
+                summary_context = df.head(10).to_string(index=False)
+                user_query = state.get('query', 'a nutrition question')
+                
+                # Fetch the prompt from our clean, isolated file
+                summary_prompt = get_summary_prompt(
+                    user_query=user_query, 
+                    data_context=summary_context, 
+                    user_profile=state.get("user_profile", {})
+                )
+                
+                # Call the LLM
+                summary_response = llm.invoke([HumanMessage(content=summary_prompt)])
+                ai_summary = summary_response.content.strip()
+                
+        except Exception as summary_err:
+            print(f"Summary generation failed (falling back to default): {summary_err}")
+            pass 
 
         # Return the results
-        return {"visual_type": final_types, "fig": final_figs, "data": df}
+        return {
+            "visual_type": final_types, 
+            "fig": final_figs, 
+            "data": df, 
+            "summary": ai_summary
+        }
 
     # Return error JSON instead of crashing
     except Exception as e:
         print(f"Visualizer logic error: {e}")
-        return {"visual_type": ["table"], "fig": [df], "data": df}
-
+        return {"visual_type": ["table"], "fig": [df], "data": df, "summary": "There was an error generating your visualizations."}
 
 # ====================================================
 #  10. BUILD LANGGRAPH (FINAL ASSEMBLY)

@@ -18,11 +18,10 @@ app = FastAPI()
 # This tells the server it is allowed to accept requests from outside websites.
 app.add_middleware(
     CORSMiddleware,
-    #allow_origins=["http://localhost:3000", "http://localhost:5173"],
     allow_origins=[
-        "http://localhost:5173", # Your local React app
-        "http://localhost:3000", # Alternative local port just in case
-        # "https://your-future-vercel-url.vercel.app" <-- We will add this later!
+        "http://localhost:5173",                    # Your local React app
+        "http://localhost:3000",                    # Alternative local port just in case
+        "https://health-lifestyle-493817.web.app"   # Production URL
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -36,35 +35,42 @@ app.add_middleware(
 async def ask(request: Request):
     body = await request.json()
     user_query = body.get("user_query")
-    food_type_filter = body.get("food_type_filter", "All")  # Catch the food type filter
-    diet_type_filter = body.get("diet_type_filter", "All")  # Catch the diet type filter
-    size_filter = body.get("size_filter", "By portion")     # Catch the size filter
+
     is_daily_log = body.get("is_daily_log", False)          # Catch the daily food log
     user_profile = body.get("user_profile", {})             # Catch the biological profile (default to empty dict)
     
     # Pass it into the LangGraph state
     initial_state = {
-        "query": user_query,
-        "food_type_filter": food_type_filter,
-        "diet_type_filter": diet_type_filter,   
-        "size_filter": size_filter,             
+        "query": user_query,          
         "is_daily_log": is_daily_log,           
         "user_profile": user_profile,           
         "sql_query": None,
         "data": None,
         "error": None,
         "visual_type": None,
-        "fig": None
+        "fig": None,
+        "summary": None
     }
     
     # Run the LangGraph flow
     result = agents_flow.invoke(initial_state)
-    
+
+    # ADD THIS NEW TYPE F INTERCEPTOR BLOCK:
+    sql_string = result.get("sql_query") or ""
+    if "CONVERSATION" in sql_string.upper():
+        # Hide all the UI triggers for conversational questions!
+        result["sql_query"] = None
+        result["data"] = None
+        result["visual_type"] = None
+        result["totals"] = None
+        result["fig"] = None
+
     # Serialize the result for JSON response
     response_data = {
         "sql_query": result.get("sql_query"),
         "error": result.get("error"),
         "visual_type": result.get("visual_type"),
+        "summary": result.get("summary", "Here is the result.")
     }
     
     # Handle the data (DataFrame -> List of dicts)

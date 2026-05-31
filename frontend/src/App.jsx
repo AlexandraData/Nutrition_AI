@@ -8,7 +8,8 @@ import { Send, Database, Table, PieChart, BarChart, Activity, ChevronDown, Chevr
 import './App.css';
 
 // const API_URL = 'http://localhost:8000/ask/';  For local development
-const API_URL = 'https://nutrition-backend-355269382421.us-central1.run.app/ask/';  // For deployed cloud run
+const BASE_URL = 'https://nutrition-backend-355269382421.us-central1.run.app';    // For deployed cloud run
+const API_URL = `${BASE_URL}/ask/`;
 
 // ============================================
 // 2. MAIN APP COMPONENT
@@ -43,22 +44,26 @@ function App() {
     "Standard", "Vegetarian", "Vegan"
   ];
 
-  // --- FOOD TYPE FILTER STATE ---
-  const [selectedFoodType, setSelectedFoodType] = useState('Foundation Food'); // Default to Foundation Food
-
-  // --- DIET TYPE FILTER STATE ---
-  const [selectedDietType, setSelectedDietType] = useState('All'); // Default to All
-
-  // --- SIZE FILTER STATE ---
-  const [selectedSize, setSelectedSize] = useState('By portion'); // Default to By Portion
-
   // --- DAILY FOOD TRACKER STATE ---
   const [dailyMeals, setDailyMeals] = useState({
-    breakfast: '',
-    lunch: '',
-    afternoon: '',
-    dinner: ''
+    breakfast: [''],
+    lunch: [''],
+    afternoon: [''],
+    dinner: ['']
   });
+
+  // --- DYNAMIC INGREDIENT HANDLERS ---
+  const handleIngredientChange = (mealType, index, value) => {
+    const updatedMeals = { ...dailyMeals };
+    updatedMeals[mealType][index] = value;
+    setDailyMeals(updatedMeals);
+  };
+
+  const addIngredientLine = (mealType) => {
+    const updatedMeals = { ...dailyMeals };
+    updatedMeals[mealType].push('');
+    setDailyMeals(updatedMeals);
+  };
 
   // --- USER PROFILE STATE ---
   const [showProfile, setShowProfile] = useState(false);
@@ -72,17 +77,16 @@ function App() {
 
   // --- DATA SOURCE INFO STATE ---
   const [showInfo, setShowInfo] = useState(false);
+  const [showIngredientTips, setShowIngredientTips] = useState(false);
 
   // FOOD TYPE, DIET TYPE, AND SIZE FILTER STATES
   const FOOD_TYPES = [
-    { label: "All Foods", value: "All" },
     { label: "Foundation Food", value: "Foundation Food" },
     { label: "Branded Food", value: "Branded Food" },
     { label: "Survey Food", value: "Survey Food" }
   ];
 
   const DIET_TYPES = [
-    { label: "All Diets", value: "All" },
     { label: "Standard", value: "Standard" },
     { label: "Vegetarian", value: "Vegetarian" },
     { label: "Vegan", value: "Vegan" }
@@ -116,7 +120,7 @@ function App() {
 
     try {
       // const response = await fetch(`http://localhost:8000/search_foods/?q=${encodeURIComponent(query)}`); // For local development
-      const response = await fetch(`${API_URL}/search_foods/?q=${encodeURIComponent(query)}`); // For deployed cloud run
+      const response = await fetch(`${BASE_URL}/search_foods/?q=${encodeURIComponent(query)}`); // For deployed cloud run
       if (!response.ok) throw new Error("Network response was not ok");
 
       const data = await response.json();
@@ -138,8 +142,14 @@ function App() {
       newQuery = `What are the nutrients of ${itemName}?`;
     } else if (listType === 'vitamins' || listType === 'minerals') {
       newQuery = `What are the top 10 foods in ${itemName}?`;
-    } else if (listType === 'diets') {
-      newQuery = `Show me foods suitable for a ${itemName} diet.`;
+      //} else if (listType === 'diets') {
+      //  newQuery = `Show me foods suitable for a ${itemName} diet.`;
+    } else if (listType === 'food_type') {
+      newQuery = `Show me 10 examples of ${itemName}.`;
+    } else if (listType === 'diet_type') {
+      newQuery = `Show me top foods suitable for a ${itemName} diet.`;
+    } else if (listType === 'size') {
+      newQuery = `Show me the nutrients of an apple calculated ${itemName.toLowerCase()}.`;
     } else {
       newQuery = itemName;
     }
@@ -149,15 +159,48 @@ function App() {
   };
 
   const submitDailyFood = async () => {
-    // 1. Combine the meals into a single AI prompt
-    const diaryPrompt = `Calculate the total nutritional intake for my daily food diary:
-    Breakfast: ${dailyMeals.breakfast || 'Nothing'}
-    Lunch: ${dailyMeals.lunch || 'Nothing'}
-    Afternoon snack: ${dailyMeals.afternoon || 'Nothing'}
-    Dinner: ${dailyMeals.dinner || 'Nothing'}
-    Return a detailed breakdown for every food item.`;
+    // 1. Collect all valid items across all meals to get the exact count
+    const allItems = [
+      ...dailyMeals.breakfast,
+      ...dailyMeals.lunch,
+      ...dailyMeals.afternoon,
+      ...dailyMeals.dinner
+    ].filter(item => item.trim() !== '');
 
-    // 2. Add the user's message to the chat UI (FIXED: Using 'role' instead of 'sender')
+    const totalItemsCount = allItems.length;
+
+    // Optional: Prevent them from submitting a completely empty day
+    if (totalItemsCount === 0) return;
+
+    // 2. Format arrays as vertical bulleted lists (LLMs process lists better than commas)
+    const formatMeal = (mealArray) => {
+      const cleaned = mealArray.filter(item => item.trim() !== '');
+      return cleaned.length > 0 ? cleaned.map(item => `  - ${item}`).join('\n') : '  - Nothing';
+    };
+
+    // 3. Build a highly constrained prompt using the exact item count
+    const diaryPrompt = `Calculate the total nutritional intake for my daily food diary. 
+I am providing EXACTLY ${totalItemsCount} food items. You MUST return a nutritional breakdown for EVERY SINGLE ONE of these ${totalItemsCount} items.
+
+My Meals:
+Breakfast:
+${formatMeal(dailyMeals.breakfast)}
+
+Lunch:
+${formatMeal(dailyMeals.lunch)}
+
+Afternoon snack:
+${formatMeal(dailyMeals.afternoon)}
+
+Dinner:
+${formatMeal(dailyMeals.dinner)}
+
+CRITICAL INSTRUCTIONS:
+1. Do NOT skip any items. 
+2. If you cannot find an exact match in the database, search for the closest generic equivalent (e.g., if "whole wheat bread" fails, search for "wheat bread").
+3. Verify that your final output includes exactly ${totalItemsCount} distinct foods before finalizing your response.`;
+
+    // 4. Add the user's message to the chat UI
     const newUserMsg = { role: 'user', content: "Calculated Daily Food Diary." };
     setMessages(prev => [...prev, newUserMsg]);
     setLoading(true);
@@ -181,7 +224,7 @@ function App() {
       // Using 'role: assistant' and adding a text 'content' so the chat bubble isn't empty
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: 'Here is your daily nutrition breakdown:',
+        content: data.summary || 'Here is your daily nutrition breakdown:', // Look for the AI summary, fallback to the static text
         visual_type: data.visual_type,
         data: data.data,
         fig: data.fig,
@@ -197,7 +240,7 @@ function App() {
     } finally {
       setLoading(false);
       // Clear the form for the next day
-      setDailyMeals({ breakfast: '', lunch: '', afternoon: '', dinner: '' });
+      setDailyMeals({ breakfast: [''], lunch: [''], afternoon: [''], dinner: [''] });
     }
   };
 
@@ -217,9 +260,8 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_query: query,
-          food_type_filter: selectedFoodType, // Send the filter
-          diet_type_filter: selectedDietType, // Send the filter
-          size_filter: selectedSize           // Send the filter
+          is_daily_log: false,        // Catch the daily food log
+          user_profile: userProfile   // Catch the biological profile
         }),
       });
 
@@ -228,7 +270,7 @@ function App() {
       const data = await response.json();
       const assistantMessage = {
         role: 'assistant',
-        content: 'Here is the result.',
+        content: data.summary || 'Here is the result.', // Look for the AI summary, fallback if it fails
         ...data
       };
       setMessages(prev => [...prev, assistantMessage]);
@@ -265,7 +307,7 @@ function App() {
           marginBottom: '8px',
           marginTop: '0px'
         }}>
-          Filters:
+          Helpers search:
         </h4>
         <button
           className={`side-btn ${activeModal === 'food_type' ? 'active' : ''}`}
@@ -286,17 +328,6 @@ function App() {
           Diet Type
         </button>
 
-        {/* --- Search Group Title --- */}
-        <h4 style={{
-          fontSize: '11px',
-          textTransform: 'capitalize',
-          letterSpacing: '0.05em',
-          color: '#64748b',
-          marginBottom: '8px',
-          marginTop: '16px' // Add margin-top for group spacing
-        }}>
-          Search:
-        </h4>
         <button
           className={`side-btn ${activeModal === 'foods' ? 'active' : ''}`}
           onClick={() => setActiveModal('foods')}
@@ -338,7 +369,7 @@ function App() {
           User Profile
         </button>
 
-        {/* --- NEW: DAILY FOOD BUTTON --- */}
+        {/* --- DAILY FOOD BUTTON --- */}
         <button
           className={`side-btn ${activeModal === 'daily_food' ? 'active' : ''}`}
           onClick={() => setActiveModal('daily_food')}
@@ -349,7 +380,7 @@ function App() {
 
       </aside>
 
-      {/* --- 6. NEW DYNAMIC SHARED MODAL --- */}
+      {/* --- 6. DYNAMIC SHARED MODAL --- */}
       {activeModal && (
         <div className="modal-overlay" onClick={() => setActiveModal(null)}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
@@ -395,13 +426,13 @@ function App() {
 
             <div className="modal-body">
 
-              {/* --- NEW: Food Type Filter UI --- */}
+              {/* --- Food Type Filter UI --- */}
               {activeModal === 'food_type' && (
                 <ul className="grid-list single-col">
                   {FOOD_TYPES.map(type => (
                     <li
                       key={type.value}
-                      /* --- UPDATED: ALL THREE TOOLTIPS --- */
+                      /* --- ALL THREE TOOLTIPS --- */
                       title={
                         type.label === 'Foundation Food'
                           ? "Foundation Foods are basic, unbranded ingredients and raw agricultural products (such as fresh fruits, vegetables, and raw meats). They serve as the core building blocks for recipes and other complex food databases."
@@ -411,15 +442,8 @@ function App() {
                               ? "Branded Foods are commercially packaged products and restaurant menu items. Their nutritional data is provided directly by food brands and manufacturers, typically reflecting the Nutrition Facts panel found on the product packaging."
                               : ""
                       }
-                      onClick={() => {
-                        setSelectedFoodType(type.value);
-                        setActiveModal(null);
-                      }}
-                      style={{
-                        cursor: 'pointer',
-                        backgroundColor: selectedFoodType === type.value ? '#e2e8f0' : '#f8fafc',
-                        borderLeft: selectedFoodType === type.value ? '4px solid #1e293b' : '1px solid #f1f5f9'
-                      }}
+                      onClick={() => handleItemSelect(type.label, 'food_type')}
+                      style={{ cursor: 'pointer' }}
                     >
                       {type.label}
                     </li>
@@ -427,21 +451,14 @@ function App() {
                 </ul>
               )}
 
-              {/* --- NEW: Diet Type Filter UI --- */}
+              {/* --- Diet Type Filter UI --- */}
               {activeModal === 'diet_type' && (
                 <ul className="grid-list single-col">
                   {DIET_TYPES.map(type => (
                     <li
                       key={type.value}
-                      onClick={() => {
-                        setSelectedDietType(type.value);
-                        setActiveModal(null);
-                      }}
-                      style={{
-                        cursor: 'pointer',
-                        backgroundColor: selectedDietType === type.value ? '#e2e8f0' : '#f8fafc',
-                        borderLeft: selectedDietType === type.value ? '4px solid #1e293b' : '1px solid #f1f5f9'
-                      }}
+                      onClick={() => handleItemSelect(type.label, 'diet_type')}
+                      style={{ cursor: 'pointer' }}
                     >
                       {type.label}
                     </li>
@@ -449,21 +466,14 @@ function App() {
                 </ul>
               )}
 
-              {/* --- NEW: Size Filter UI --- */}
+              {/* --- Size Filter UI --- */}
               {activeModal === 'size' && (
                 <ul className="grid-list single-col">
                   {SIZE_TYPES.map(type => (
                     <li
                       key={type.value}
-                      onClick={() => {
-                        setSelectedSize(type.value);
-                        setActiveModal(null);
-                      }}
-                      style={{
-                        cursor: 'pointer',
-                        backgroundColor: selectedSize === type.value ? '#e2e8f0' : '#f8fafc',
-                        borderLeft: selectedSize === type.value ? '4px solid #1e293b' : '1px solid #f1f5f9'
-                      }}
+                      onClick={() => handleItemSelect(type.label, 'size')}
+                      style={{ cursor: 'pointer' }}
                     >
                       {type.label}
                     </li>
@@ -518,26 +528,93 @@ function App() {
               {activeModal === 'daily_food' && (
                 <div style={{ padding: '0px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
                   <p style={{ margin: 0, fontSize: '12px', color: '#64748b', marginBottom: '8px' }}>
-                    Type what you eat naturally (e.g., "1 cup of milk, 2 slices of whole wheat bread").
+                    Type what you eat and drink naturally. One ingredient per line. <br />
+                    Click + to add a new ingredient.
+                    <button
+                      type="button"
+                      onClick={() => setShowIngredientTips(true)}
+                      style={{
+                        background: 'none', border: 'none', padding: 0, margin: '0 0 0 4px',
+                        color: '#3b82f6', textDecoration: 'underline', cursor: 'pointer', fontSize: '12px'
+                      }}
+                    >
+                      Read this
+                    </button>
                   </p>
 
-                  {['breakfast', 'lunch', 'afternoon', 'dinner'].map((meal) => (
-                    <div key={meal}>
-                      <label style={{ display: 'block', textTransform: 'capitalize', marginBottom: '4px', fontSize: '14px', fontWeight: 'bold' }}>
-                        {meal === 'afternoon' ? 'Afternoon snack' : meal}
-                      </label>
-                      <textarea
-                        value={dailyMeals[meal]}
-                        onChange={(e) => setDailyMeals({ ...dailyMeals, [meal]: e.target.value })}
-                        placeholder={`What did you have for ${meal === 'afternoon' ? 'afternoon snack' : meal}?`}
-                        style={{
-                          width: '100%', minHeight: '60px', padding: '8px',
-                          borderRadius: '8px', border: '1px solid #cbd5e1', resize: 'vertical'
-                        }}
-                      />
-                    </div>
-                  ))}
+                  {/* 1. Define the specific placeholders for each meal key */}
+                  {['breakfast', 'lunch', 'afternoon', 'dinner'].map((meal) => {
+                    const placeholders = {
+                      breakfast: 'e.g., 1 slice of bread',
+                      lunch: 'e.g., 150 gr rice',
+                      afternoon: 'e.g., 1 cup of tea',
+                      dinner: 'e.g., 100 gr broccoli'
+                    };
 
+                    return (
+                      <div key={meal}>
+                        <label style={{ display: 'block', textTransform: 'capitalize', marginBottom: '4px', fontSize: '14px', fontWeight: 'bold' }}>
+                          {meal === 'afternoon' ? 'Afternoon snack' : meal}
+                        </label>
+                        <div style={{
+                          backgroundColor: '#333333',
+                          borderRadius: '8px',
+                          padding: '12px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '8px'
+                        }}>
+                          {dailyMeals[meal].map((ingredient, index) => (
+                            <input
+                              key={index}
+                              type="text"
+                              value={ingredient}
+                              onChange={(e) => handleIngredientChange(meal, index, e.target.value)}
+                              // 2. Use the dictionary to look up the correct placeholder for this specific meal
+                              placeholder={index === 0 ? placeholders[meal] : ""}
+                              style={{
+                                width: '100%',
+                                backgroundColor: 'transparent',
+                                border: 'none',
+                                borderBottom: '1px solid #718096',
+                                color: 'white',
+                                padding: '4px',
+                                fontSize: '14px',
+                                outline: 'none'
+                              }}
+                            />
+                          ))}
+
+                          {/* Plus Button */}
+                          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '4px' }}>
+                            <button
+                              type="button"
+                              onClick={() => addIngredientLine(meal)}
+                              style={{
+                                color: '#cbd5e1',
+                                backgroundColor: '#475569',
+                                borderRadius: '50%',
+                                width: '20px',
+                                height: '20px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer',
+                                border: 'none',
+                                fontSize: '16px',
+                                lineHeight: '1'
+                              }}
+                              title="Add ingredient line"
+                            >
+                              +
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {/* Important: Make sure your submit button is still here below the mapping! */}
                   <button
                     onClick={() => {
                       submitDailyFood();
@@ -553,7 +630,6 @@ function App() {
                   </button>
                 </div>
               )}
-
             </div>
           </div>
         </div>
@@ -679,7 +755,7 @@ function App() {
         </div>
       )}
 
-      {/* --- NEW: INFORMATION MODAL --- */}
+      {/* --- INFORMATION MODAL (i Icon--- */}
       {showInfo && (
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
@@ -720,6 +796,49 @@ function App() {
               </p>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* --- INGREDIENT TIPS MODAL --- */}
+      {showIngredientTips && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex',
+          justifyContent: 'center', alignItems: 'center', zIndex: 10000 /* Higher than the main modal */
+        }}>
+          <div style={{
+            backgroundColor: 'white', padding: '24px', borderRadius: '12px',
+            width: '90%', maxWidth: '450px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)'
+          }}>
+            {/* Header */}
+            <div style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              marginBottom: '16px', paddingBottom: '12px', borderBottom: '1px solid #e2e8f0'
+            }}>
+              <h3 style={{ margin: 0, fontSize: '1.1rem', color: '#1e293b', fontWeight: '700' }}>
+                Ingredient Matching Tips
+              </h3>
+              <button
+                onClick={() => setShowIngredientTips(false)}
+                style={{
+                  background: 'none', border: 'none', fontSize: '1.5rem',
+                  cursor: 'pointer', color: '#94a3b8', lineHeight: '1', padding: '0'
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Body */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', color: '#334155', fontSize: '13px', lineHeight: '1.5' }}>
+              <p style={{ margin: 0 }}>As there are several ingredients with similar names, in order to match the reference of USDA:</p>
+              <ul style={{ margin: 0, paddingLeft: '20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <li>For tap water write <strong>'Beverages, water, tap, drinking'</strong> (e.g. <em>1 liter of Beverages, water, tap, drinking</em>).</li>
+                <li>For bottle water write <strong>'Water, bottled, non-carbonated, naya'</strong> (e.g. <em>1 Water, bottled, non-carbonated, naya</em>).</li>
+                <li>If there is any other ingredient that is not matching your request, first check the name in the <strong>Search 'Foods'</strong> menu.</li>
+              </ul>
+            </div>
           </div>
         </div>
       )}
@@ -856,7 +975,7 @@ function App() {
                 <div className="assistant-avatar">AI</div>
                 <div className="message-bubble loading-bubble">
                   <Loader2 className="animate-spin" size={20} />
-                  <span>Searching...</span>
+                  <span>Searching... up to 2 min</span>
                 </div>
               </div>
             </div>
@@ -896,19 +1015,6 @@ function App() {
 
       <footer className="footer">
         {/* --- ALWAYS VISIBLE ACTIVE FILTER INDICATOR --- */}
-        <div style={{ textAlign: 'center', marginBottom: '8px' }}>
-          <span style={{
-            backgroundColor: '#e2e8f0', color: '#334155', padding: '4px 12px',
-            borderRadius: '16px', fontSize: '12px', fontWeight: '600', display: 'inline-block'
-          }}>
-            <span style={{ filter: 'saturate(25%)', marginRight: '6px' }}>🔍</span>
-            Filtering by:
-            {selectedFoodType !== 'All' ? ` ${selectedFoodType} |` : ''}
-            {selectedDietType !== 'All' ? ` ${selectedDietType} Diet |` : ''}
-            {selectedSize === 'By 100 gr' ? ' Amount per 100 gr' : ' Amount per portion'}
-          </span>
-        </div>
-
         <form onSubmit={handleSubmit} className="input-container">
           <input
             type="text"
