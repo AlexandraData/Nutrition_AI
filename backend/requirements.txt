@@ -11,3 +11,4 @@ python-dotenv
 db-dtypes
 plotly
 google-cloud-bigquery-storage
+Pillow

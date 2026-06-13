@@ -4,7 +4,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import PlotlyComponent from 'react-plotly.js';
 const Plot = PlotlyComponent.default || PlotlyComponent;
-import { Send, Database, Table, PieChart, BarChart, Activity, ChevronDown, ChevronUp, AlertCircle, Loader2 } from 'lucide-react';
+import {
+  Send, Database, Table, PieChart, BarChart, Activity, ChevronDown,
+  ChevronUp, AlertCircle, Loader2, User, Utensils, Tag, Scale, Leaf,
+  Search, Pill, Droplet, Apple, Beef, Fish, MessageCircle
+} from 'lucide-react';
 import './App.css';
 
 // const API_URL = 'http://localhost:8000/ask/';  For local development
@@ -16,19 +20,62 @@ const API_URL = `${BASE_URL}/ask/`;
 // ============================================
 function App() {
 
-  // --- 1. EXISTING STATES ---
+  // --- EXISTING STATES ---
   const [query, setQuery] = useState('');
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
   const chatEndRef = useRef(null);
 
-  // --- 2. NEW STATES FOR SIDEBAR & MODAL ---
+  // --- THREAD ID FOR MEMORY ---
+  // Create a random ID once when the page loads
+  const [threadId, setThreadId] = useState(() => Math.random().toString(36).substring(7));
+
+  // --- CHAT HISTORY STATE (Loads from Browser Memory) ---
+  const [chatHistory, setChatHistory] = useState(() => {
+    const saved = localStorage.getItem('nutrition_ai_chats');
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  // --- FUNCTION TO SAVE & CLEAR CHAT ---
+  const startNewChat = () => {
+    // Only save if there's actually a conversation to save
+    if (messages.length > 0) {
+      // Find the first question the user asked to use as the button title
+      const firstUserMsg = messages.find(m => m.role === 'user');
+      const title = firstUserMsg ? firstUserMsg.content : "Daily Food Log";
+
+      const newChatToSave = {
+        threadId: threadId,
+        title: title,
+        messages: messages
+      };
+
+      // Add to the top of the history list, and keep a maximum of 15 recent chats
+      const updatedHistory = [newChatToSave, ...chatHistory].slice(0, 15);
+
+      setChatHistory(updatedHistory); // Update React UI
+      localStorage.setItem('nutrition_ai_chats', JSON.stringify(updatedHistory)); // Save to browser
+    }
+
+    // Now clear the screen for the new chat
+    setMessages([]);
+    setThreadId(Math.random().toString(36).substring(7));
+    setQuery("");
+  };
+
+  // --- FUNCTION TO LOAD PAST CHATS ---
+  const loadPastChat = (pastChat) => {
+    setMessages(pastChat.messages);
+    setThreadId(pastChat.threadId);
+  };
+
+  // --- STATES FOR SIDEBAR & MODAL ---
   const [activeModal, setActiveModal] = useState(null);
   const [foodSearchQuery, setFoodSearchQuery] = useState("");
   const [foodSearchResults, setFoodSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
 
-  // --- 3. STATIC LISTS ---
+  // --- STATIC LISTS ---
   const VITAMINS_LIST = [
     "Vitamin A", "Vitamin B1 (Thiamin)", "Vitamin B2 (Riboflavin)", "Vitamin B3 (Niacin)",
     "Vitamin B5 (Pantothenic acid)", "Vitamin B6", "Vitamin B7 (Biotin)", "Vitamin B9 (Folate)",
@@ -43,6 +90,94 @@ function App() {
   const DIETS_LIST = [
     "Standard", "Vegetarian", "Vegan"
   ];
+
+  // --- STYLE CHIP STATE & DATA ---
+  const [expandedCategory, setExpandedCategory] = useState(null);
+
+  // 1. Create a reference to attach to our helper container
+  const helpersRef = useRef(null);
+
+  // 2. Listen for clicks anywhere on the screen
+  useEffect(() => {
+    function handleClickOutside(event) {
+      // If the helper menu is open AND the click was outside the helpersRef container...
+      if (helpersRef.current && !helpersRef.current.contains(event.target)) {
+        setExpandedCategory(null); // Close the menu
+      }
+    }
+
+    // Add the event listener
+    document.addEventListener("mousedown", handleClickOutside);
+
+    // Clean up the listener when the component unmounts
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
+
+  const helperQueries = {
+    "Food Type": [
+      "Show me 10 examples of Foundation Food",
+      "Show me 10 examples of Branded Food",
+      "Show me 10 examples of Survey Food"
+    ],
+    "Food Size": [
+      "What is the standard portion size for an apple?",
+      "Nutrients in 100g of chicken breast",
+      "Show me calories in 1 cup of cooked rice"
+    ],
+    "Diet Type": [
+      "Top foods suitable for a Standard diet",
+      "Top foods suitable for a Vegetarian diet",
+      "Top foods suitable for a Vegan diet"
+    ],
+    "Foods": [
+      "🔍 Search Food Database...",
+      "What are the macronutrients of an apple?",
+      "Show me the nutrient profile of a banana",
+      "How much protein is in an egg?"
+    ],
+    "Vitamins": [
+      "Top 10 foods in Vitamin A",
+      "Top 10 foods in Vitamin B1 (Thiamin)",
+      "Top 10 foods in Vitamin B2 (Riboflavin)",
+      "Top 10 foods in Vitamin B3 (Niacin)",
+      "Top 10 foods in Vitamin B5 (Pantothenic acid)",
+      "Top 10 foods in Vitamin B6",
+      "Top 10 foods in Vitamin B7 (Biotin)",
+      "Top 10 foods in Vitamin B9 (Folate)",
+      "Top 10 foods in Vitamin B12",
+      "Top 10 foods in Vitamin C",
+      "Top 10 foods in Vitamin D",
+      "Top 10 foods in Vitamin E",
+      "Top 10 foods in Vitamin K"
+    ],
+    "Minerals": [
+      "Top 10 foods high in Calcium, Ca",
+      "Top 10 foods high in Copper, Cu",
+      "Top 10 foods high in Iron, Fe",
+      "Top 10 foods high in Magnesium, Mg",
+      "Top 10 foods high in Manganese, Mn",
+      "Top 10 foods high in Phosphorus, P",
+      "Top 10 foods high in Potassium, K",
+      "Top 10 foods high in Selenium, Se",
+      "Top 10 foods high in Sodium, Na",
+      "Top 10 foods high in Zinc, Zn"
+    ]
+  };
+
+  // --- ICON MAPPING FUNCTION FOR CATEGORIES ---
+  const getCategoryIcon = (category) => {
+    switch (category) {
+      case "Food Type": return <Apple size={14} />;
+      case "Food Size": return <Scale size={14} />;
+      case "Diet Type": return <Leaf size={14} />;
+      case "Foods": return <Search size={14} />;
+      case "Vitamins": return <Pill size={14} />;
+      case "Minerals": return <Droplet size={14} />;
+      default: return null;
+    }
+  };
 
   // --- DAILY FOOD TRACKER STATE ---
   const [dailyMeals, setDailyMeals] = useState({
@@ -180,25 +315,25 @@ function App() {
 
     // 3. Build a highly constrained prompt using the exact item count
     const diaryPrompt = `Calculate the total nutritional intake for my daily food diary. 
-I am providing EXACTLY ${totalItemsCount} food items. You MUST return a nutritional breakdown for EVERY SINGLE ONE of these ${totalItemsCount} items.
+    I am providing EXACTLY ${totalItemsCount} food items. You MUST return a nutritional breakdown for EVERY SINGLE ONE of these ${totalItemsCount} items.
 
-My Meals:
-Breakfast:
-${formatMeal(dailyMeals.breakfast)}
+    My Meals:
+    Breakfast:
+    ${formatMeal(dailyMeals.breakfast)}
 
-Lunch:
-${formatMeal(dailyMeals.lunch)}
+    Lunch:
+    ${formatMeal(dailyMeals.lunch)}
 
-Afternoon snack:
-${formatMeal(dailyMeals.afternoon)}
+    Afternoon snack:
+    ${formatMeal(dailyMeals.afternoon)}
 
-Dinner:
-${formatMeal(dailyMeals.dinner)}
+    Dinner:
+    ${formatMeal(dailyMeals.dinner)}
 
-CRITICAL INSTRUCTIONS:
-1. Do NOT skip any items. 
-2. If you cannot find an exact match in the database, search for the closest generic equivalent (e.g., if "whole wheat bread" fails, search for "wheat bread").
-3. Verify that your final output includes exactly ${totalItemsCount} distinct foods before finalizing your response.`;
+    CRITICAL INSTRUCTIONS:
+    1. Do NOT skip any items. 
+    2. If you cannot find an exact match in the database, search for the closest generic equivalent (e.g., if "whole wheat bread" fails, search for "wheat bread").
+    3. Verify that your final output includes exactly ${totalItemsCount} distinct foods before finalizing your response.`;
 
     // 4. Add the user's message to the chat UI
     const newUserMsg = { role: 'user', content: "Calculated Daily Food Diary." };
@@ -260,6 +395,7 @@ CRITICAL INSTRUCTIONS:
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_query: query,
+          thread_id: threadId,        // Pass the ID to the backend
           is_daily_log: false,        // Catch the daily food log
           user_profile: userProfile   // Catch the biological profile
         }),
@@ -286,573 +422,112 @@ CRITICAL INSTRUCTIONS:
   };
 
   return (
-    <div className="app-container">
-      <header className="header">
-        <div className="logo-container">
-          <div className="logo-icon">🥗</div>
-          <h1>Nutrition AI</h1>
+    <div className="app-layout">
+
+      {/* ========================================= */}
+      {/* 1. LEFT SIDEBAR                     */}
+      {/* ========================================= */}
+      <aside className="main-sidebar">
+        {/* Logo & Subtitle */}
+        <div className="sidebar-brand">
+          <h2>🥗 Nutrition AI</h2>
+          <p>Ask about calories, fats and more.</p>
         </div>
-        <p className="subtitle">Ask anything about calories, fats, vitamins and more.</p>
-      </header>
 
-      {/* --- 5. NEW FLOATING LEFT SIDEBAR --- */}
-      <aside className="sidebar-menu">
+        {/* Tracker Section */}
+        <div className="sidebar-section">
+          <h4>Food Tracker</h4>
+          <button className="side-btn" onClick={() => setShowProfile(true)}>
+            <User size={16} /> User Profile
+          </button>
+          <button className="side-btn" onClick={() => setActiveModal('daily_food')}>
+            <Utensils size={16} /> Daily Food
+          </button>
+        </div>
 
-        {/* --- Filters Group Title --- */}
-        <h4 style={{
-          fontSize: '11px',
-          textTransform: 'capitalize',
-          letterSpacing: '0.05em',
-          color: '#64748b',
-          marginBottom: '8px',
-          marginTop: '0px'
-        }}>
-          Helpers search:
-        </h4>
-        <button
-          className={`side-btn ${activeModal === 'food_type' ? 'active' : ''}`}
-          onClick={() => setActiveModal('food_type')}
-        >
-          Food Type
-        </button>
-        <button
-          className={`side-btn ${activeModal === 'size' ? 'active' : ''}`}
-          onClick={() => setActiveModal('size')}
-        >
-          Food Size
-        </button>
-        <button
-          className={`side-btn ${activeModal === 'diet_type' ? 'active' : ''}`}
-          onClick={() => setActiveModal('diet_type')}
-        >
-          Diet Type
+        {/* New Chat Button */}
+        <button className="new-chat-btn" onClick={startNewChat}>
+          <MessageCircle size={16} /> New Chat
         </button>
 
-        <button
-          className={`side-btn ${activeModal === 'foods' ? 'active' : ''}`}
-          onClick={() => setActiveModal('foods')}
-        >
-          Foods
-        </button>
-        <button
-          className={`side-btn ${activeModal === 'vitamins' ? 'active' : ''}`}
-          onClick={() => setActiveModal('vitamins')}
-        >
-          Vitamins
-        </button>
-        <button
-          className={`side-btn ${activeModal === 'minerals' ? 'active' : ''}`}
-          onClick={() => setActiveModal('minerals')}
-        >
-          Minerals
-        </button>
-
-        {/* --- Tracker Group Title --- */}
-        <h4 style={{
-          fontSize: '11px',
-          textTransform: 'capitalize',
-          letterSpacing: '0.05em',
-          color: '#64748b',
-          marginBottom: '0px',
-          marginTop: '16px' // Add margin-top for group spacing
-        }}>
-          Tracker:
-        </h4>
-
-        <div style={{ flexGrow: 1 }}></div> {/* Pushes the button to the bottom if inside a flex container */}
-
-        {/* --- USER'S BIOLOGY PROFILE SETTINGS BUTTON --- */}
-        <button
-          className="side-btn"
-          onClick={() => setShowProfile(true)}
-        >
-          User Profile
-        </button>
-
-        {/* --- DAILY FOOD BUTTON --- */}
-        <button
-          className={`side-btn ${activeModal === 'daily_food' ? 'active' : ''}`}
-          onClick={() => setActiveModal('daily_food')}
-          style={{ borderTop: '1px solid #e2e8f0', marginTop: 'auto', paddingTop: '16px' }}
-        >
-          Daily Food
-        </button>
+        {/* Recent Chats */}
+        <div className="sidebar-section recent-chats">
+          <h4>Recent chat</h4>
+          {chatHistory.length === 0 ? (
+            <p style={{ fontSize: '12px', color: '#94a3b8', padding: '0 8px' }}>No recent chats</p>
+          ) : (
+            chatHistory.map((chat) => (
+              <button
+                key={chat.threadId}
+                className="history-btn"
+                onClick={() => loadPastChat(chat)}
+                title={chat.title}
+              >
+                {chat.title}
+              </button>
+            ))
+          )}
+        </div>
 
       </aside>
 
-      {/* --- 6. DYNAMIC SHARED MODAL --- */}
-      {activeModal && (
-        <div className="modal-overlay" onClick={() => setActiveModal(null)}>
-          <div className="modal-content" onClick={e => e.stopPropagation()}>
+      {/* ========================================= */}
+      {/* 2. MAIN CHAT AREA                         */}
+      {/* ========================================= */}
+      <main className="main-content">
 
-            {/* --- UPDATED ALIGNED HEADER --- */}
-            <div style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              marginBottom: '20px',
-              paddingBottom: '12px',
-              borderBottom: '1px solid #e2e8f0'
-            }}>
-              <h2 style={{
-                margin: 0,
-                fontSize: '1.25rem',
-                color: '#1e293b',
-                fontWeight: '700'
-              }}>
-                {activeModal === 'food_type' && 'Filter by Food Type'}
-                {activeModal === 'diet_type' && 'Filter by Diet Type'}
-                {activeModal === 'size' && 'Indicate Food Size Type'}
-                {activeModal === 'foods' && 'Search Foods'}
-                {activeModal === 'vitamins' && 'Search Vitamins'}
-                {activeModal === 'minerals' && 'Search Minerals'}
-                {activeModal === 'daily_food' && 'Daily Food Diary'}
-              </h2>
-              <button
-                onClick={() => setActiveModal(null)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  fontSize: '1.5rem',
-                  cursor: 'pointer',
-                  color: '#94a3b8',
-                  lineHeight: '1',
-                  padding: '0'
-                }}
-              >
-                ×
+        {/* --- WELCOME SCREEN --- */}
+        {messages.length === 0 && (
+          <div className="welcome-screen">
+            <div className="welcome-icon">🥦</div>
+
+            <h1 className="welcome-title">
+              How can I help you<br />
+              <span className="highlight-green">eat better</span> today?
+            </h1>
+
+            <p className="welcome-subtitle">
+              Ask about calories, macros, vitamins, swaps, recipes — or log what you ate and I'll do the math.
+            </p>
+
+            <div className="suggestion-cards">
+              <button className="suggestion-card" onClick={() => setQuery("What are the nutrients of a raw apple?")}>
+                <div className="card-icon">🍎</div>
+                <div className="card-text">
+                  <strong>Nutrients of a raw apple</strong>
+                  <span>Calories, carbs, fiber & more</span>
+                </div>
               </button>
-            </div>
 
-            <div className="modal-body">
-
-              {/* --- Food Type Filter UI --- */}
-              {activeModal === 'food_type' && (
-                <ul className="grid-list single-col">
-                  {FOOD_TYPES.map(type => (
-                    <li
-                      key={type.value}
-                      /* --- ALL THREE TOOLTIPS --- */
-                      title={
-                        type.label === 'Foundation Food'
-                          ? "Foundation Foods are basic, unbranded ingredients and raw agricultural products (such as fresh fruits, vegetables, and raw meats). They serve as the core building blocks for recipes and other complex food databases."
-                          : type.label === 'Survey Food'
-                            ? "Survey Foods reflect what people actually eat. They are comprehensive profiles of mixed dishes and composite foods (like pizza, casseroles, or mixed salads) derived from national dietary surveys."
-                            : type.label === 'Branded Food'
-                              ? "Branded Foods are commercially packaged products and restaurant menu items. Their nutritional data is provided directly by food brands and manufacturers, typically reflecting the Nutrition Facts panel found on the product packaging."
-                              : ""
-                      }
-                      onClick={() => handleItemSelect(type.label, 'food_type')}
-                      style={{ cursor: 'pointer' }}
-                    >
-                      {type.label}
-                    </li>
-                  ))}
-                </ul>
-              )}
-
-              {/* --- Diet Type Filter UI --- */}
-              {activeModal === 'diet_type' && (
-                <ul className="grid-list single-col">
-                  {DIET_TYPES.map(type => (
-                    <li
-                      key={type.value}
-                      onClick={() => handleItemSelect(type.label, 'diet_type')}
-                      style={{ cursor: 'pointer' }}
-                    >
-                      {type.label}
-                    </li>
-                  ))}
-                </ul>
-              )}
-
-              {/* --- Size Filter UI --- */}
-              {activeModal === 'size' && (
-                <ul className="grid-list single-col">
-                  {SIZE_TYPES.map(type => (
-                    <li
-                      key={type.value}
-                      onClick={() => handleItemSelect(type.label, 'size')}
-                      style={{ cursor: 'pointer' }}
-                    >
-                      {type.label}
-                    </li>
-                  ))}
-                </ul>
-              )}
-
-              {activeModal === 'foods' && (
-                <div className="food-search-container">
-                  <input
-                    type="text"
-                    placeholder="Type to search the database..."
-                    value={foodSearchQuery}
-                    onChange={handleFoodSearch}
-                    className="food-search-input"
-                  />
-                  {isSearching && <div className="search-status">Searching database...</div>}
-                  <ul className="search-results-list">
-                    {foodSearchResults.map(food => (
-                      <li key={food.fdc_id} onClick={() => handleItemSelect(food.name)}>
-                        {food.name}
-                      </li>
-                    ))}
-                    {foodSearchQuery.length >= 3 && foodSearchResults.length === 0 && !isSearching && (
-                      <li className="no-results">No foods found.</li>
-                    )}
-                  </ul>
+              <button className="suggestion-card" onClick={() => setQuery("Show me high-protein raw foods")}>
+                <div className="card-icon">💪</div>
+                <div className="card-text">
+                  <strong>Show me high-protein foods</strong>
+                  <span>Plant & animal sources, ranked</span>
                 </div>
-              )}
-
-              {activeModal === 'vitamins' && (
-                <ul className="grid-list">
-                  {VITAMINS_LIST.map(item => (
-                    <li key={item} onClick={() => handleItemSelect(item, 'vitamins')} style={{ cursor: 'pointer' }}>
-                      {item}
-                    </li>
-                  ))}
-                </ul>
-              )}
-
-              {activeModal === 'minerals' && (
-                <ul className="grid-list">
-                  {MINERALS_LIST.map(item => (
-                    <li key={item} onClick={() => handleItemSelect(item, 'minerals')} style={{ cursor: 'pointer' }}>
-                      {item}
-                    </li>
-                  ))}
-                </ul>
-              )}
-
-              {/* --- DAILY FOOD MODAL BODY --- */}
-              {activeModal === 'daily_food' && (
-                <div style={{ padding: '0px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                  <p style={{ margin: 0, fontSize: '12px', color: '#64748b', marginBottom: '8px' }}>
-                    Type what you eat and drink naturally. One ingredient per line. <br />
-                    Click + to add a new ingredient.
-                    <button
-                      type="button"
-                      onClick={() => setShowIngredientTips(true)}
-                      style={{
-                        background: 'none', border: 'none', padding: 0, margin: '0 0 0 4px',
-                        color: '#3b82f6', textDecoration: 'underline', cursor: 'pointer', fontSize: '12px'
-                      }}
-                    >
-                      Read this
-                    </button>
-                  </p>
-
-                  {/* 1. Define the specific placeholders for each meal key */}
-                  {['breakfast', 'lunch', 'afternoon', 'dinner'].map((meal) => {
-                    const placeholders = {
-                      breakfast: 'e.g., 1 slice of bread',
-                      lunch: 'e.g., 150 gr rice',
-                      afternoon: 'e.g., 1 cup of tea',
-                      dinner: 'e.g., 100 gr broccoli'
-                    };
-
-                    return (
-                      <div key={meal}>
-                        <label style={{ display: 'block', textTransform: 'capitalize', marginBottom: '4px', fontSize: '14px', fontWeight: 'bold' }}>
-                          {meal === 'afternoon' ? 'Afternoon snack' : meal}
-                        </label>
-                        <div style={{
-                          backgroundColor: '#333333',
-                          borderRadius: '8px',
-                          padding: '12px',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: '8px'
-                        }}>
-                          {dailyMeals[meal].map((ingredient, index) => (
-                            <input
-                              key={index}
-                              type="text"
-                              value={ingredient}
-                              onChange={(e) => handleIngredientChange(meal, index, e.target.value)}
-                              // 2. Use the dictionary to look up the correct placeholder for this specific meal
-                              placeholder={index === 0 ? placeholders[meal] : ""}
-                              style={{
-                                width: '100%',
-                                backgroundColor: 'transparent',
-                                border: 'none',
-                                borderBottom: '1px solid #718096',
-                                color: 'white',
-                                padding: '4px',
-                                fontSize: '14px',
-                                outline: 'none'
-                              }}
-                            />
-                          ))}
-
-                          {/* Plus Button */}
-                          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '4px' }}>
-                            <button
-                              type="button"
-                              onClick={() => addIngredientLine(meal)}
-                              style={{
-                                color: '#cbd5e1',
-                                backgroundColor: '#475569',
-                                borderRadius: '50%',
-                                width: '20px',
-                                height: '20px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                cursor: 'pointer',
-                                border: 'none',
-                                fontSize: '16px',
-                                lineHeight: '1'
-                              }}
-                              title="Add ingredient line"
-                            >
-                              +
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-
-                  {/* Important: Make sure your submit button is still here below the mapping! */}
-                  <button
-                    onClick={() => {
-                      submitDailyFood();
-                      setActiveModal(null);
-                    }}
-                    style={{
-                      backgroundColor: '#155289', color: 'white', padding: '10px',
-                      borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer',
-                      marginTop: '8px'
-                    }}
-                  >
-                    Calculate Daily Nutrients
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* --- USER'S BIOLOGY PROFILE MODAL --- */}
-      {showProfile && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex',
-          justifyContent: 'center', alignItems: 'center', zIndex: 1000
-        }}>
-          <div style={{
-            backgroundColor: 'white', padding: '24px', borderRadius: '12px',
-            width: '90%', maxWidth: '400px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)'
-          }}>
-
-            {/* --- UPDATED HEADER: Dark Grey Title & Underline --- */}
-            <div style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              marginBottom: '20px',
-              paddingBottom: '12px',
-              borderBottom: '1px solid #e2e8f0' /* Subtle light grey line */
-            }}>
-              <h2 style={{
-                margin: 0,
-                fontSize: '1.25rem',
-                color: '#1e293b', /* Dark slate grey to match your filters */
-                fontWeight: '700'
-              }}>
-                User's Biology Profile
-              </h2>
-              <button
-                onClick={() => setShowProfile(false)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  fontSize: '1.5rem',
-                  cursor: 'pointer',
-                  color: '#94a3b8', /* Muted grey for the "X" */
-                  lineHeight: '1'
-                }}
-              >
-                ×
               </button>
-            </div>
 
-            {/* --- FORM BODY (Remains same) --- */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              {/* Gender */}
-              <div>
-                <label style={{ display: 'block', fontSize: '14px', fontWeight: 'bold', marginBottom: '4px' }}>Gender</label>
-                <select
-                  value={userProfile.gender}
-                  onChange={(e) => setUserProfile({ ...userProfile, gender: e.target.value })}
-                  style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
-                >
-                  <option value="Female">Female</option>
-                  <option value="Male">Male</option>
-                </select>
-              </div>
-
-              {/* Age & Height Row */}
-              <div style={{ display: 'flex', gap: '12px' }}>
-                <div style={{ flex: 1 }}>
-                  <label style={{ display: 'block', fontSize: '14px', fontWeight: 'bold', marginBottom: '4px' }}>Age (yrs)</label>
-                  <input
-                    type="number" value={userProfile.age}
-                    onChange={(e) => setUserProfile({ ...userProfile, age: Number(e.target.value) })}
-                    style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
-                  />
+              <button className="suggestion-card" onClick={() => setQuery("Healthy fats vs. unhealthy fats")}>
+                <div className="card-icon">🥑</div>
+                <div className="card-text">
+                  <strong>Healthy fats vs. unhealthy fats</strong>
+                  <span>What to choose, what to limit</span>
                 </div>
-                <div style={{ flex: 1 }}>
-                  <label style={{ display: 'block', fontSize: '14px', fontWeight: 'bold', marginBottom: '4px' }}>Height (cm)</label>
-                  <input
-                    type="number" value={userProfile.height}
-                    onChange={(e) => setUserProfile({ ...userProfile, height: Number(e.target.value) })}
-                    style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
-                  />
+              </button>
+
+              <button className="suggestion-card" onClick={() => setActiveModal('daily_food')}>
+                <div className="card-icon">📝</div>
+                <div className="card-text">
+                  <strong>Log my breakfast</strong>
+                  <span>"2 eggs, toast, black coffee"</span>
                 </div>
-              </div>
-
-              {/* Weight */}
-              <div>
-                <label style={{ display: 'block', fontSize: '14px', fontWeight: 'bold', marginBottom: '4px' }}>Weight (kg)</label>
-                <input
-                  type="number" value={userProfile.weight}
-                  onChange={(e) => setUserProfile({ ...userProfile, weight: Number(e.target.value) })}
-                  style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
-                />
-              </div>
-
-              {/* Activity Level */}
-              <div>
-                <label style={{ display: 'block', fontSize: '14px', fontWeight: 'bold', marginBottom: '4px' }}>Activity Level</label>
-                <select
-                  value={userProfile.activity}
-                  onChange={(e) => setUserProfile({ ...userProfile, activity: Number(e.target.value) })}
-                  style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
-                >
-                  <option value={1.2}>Sedentary (Little or no exercise)</option>
-                  <option value={1.375}>Lightly active (Light exercise 1-3 days/week)</option>
-                  <option value={1.55}>Moderately active (Moderate exercise 3-5 days/week)</option>
-                  <option value={1.725}>Very active (Hard exercise 6-7 days/week)</option>
-                </select>
-              </div>
-
-              {/* Save Button */}
-              <button
-                onClick={() => setShowProfile(false)}
-                style={{
-                  marginTop: '10px', width: '100%', padding: '12px',
-                  backgroundColor: '#155289', color: 'white', border: 'none',
-                  borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer'
-                }}
-              >
-                Save Profile
               </button>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* --- INFORMATION MODAL (i Icon--- */}
-      {showInfo && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex',
-          justifyContent: 'center', alignItems: 'center', zIndex: 1000
-        }}>
-          <div style={{
-            backgroundColor: 'white', padding: '24px', borderRadius: '12px',
-            width: '90%', maxWidth: '450px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)'
-          }}>
-
-            {/* Header */}
-            <div style={{
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              marginBottom: '20px', paddingBottom: '12px', borderBottom: '1px solid #e2e8f0'
-            }}>
-              <h2 style={{ margin: 0, fontSize: '1.25rem', color: '#1e293b', fontWeight: '700' }}>
-                About Nutrition AI
-              </h2>
-              <button
-                onClick={() => setShowInfo(false)}
-                style={{
-                  background: 'none', border: 'none', fontSize: '1.5rem',
-                  cursor: 'pointer', color: '#94a3b8', lineHeight: '1', padding: '0'
-                }}
-              >
-                ×
-              </button>
-            </div>
-
-            {/* Body */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', color: '#334155', fontSize: '14px', lineHeight: '1.6' }}>
-              <p style={{ margin: 0 }}>
-                <strong>Data Source:</strong> The nutritional data provided in this application is sourced directly from the <strong>United States Department of Agriculture (USDA)</strong> FoodData Central database, ensuring highly accurate and scientifically validated food profiles.
-              </p>
-              <p style={{ margin: 0 }}>
-                <strong>Biological Calculations:</strong> Your personalized daily targets are calculated using gold-standard clinical guidelines. Caloric and macronutrient needs use the <strong>Mifflin-St Jeor equation</strong> (adjusted for activity level), while Vitamin and Mineral targets are strictly based on the <strong>NIH Dietary Reference Intakes (DRIs)</strong> tailored to your specific age and gender.
-              </p>
-            </div>
-
-          </div>
-        </div>
-      )}
-
-      {/* --- INGREDIENT TIPS MODAL --- */}
-      {showIngredientTips && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex',
-          justifyContent: 'center', alignItems: 'center', zIndex: 10000 /* Higher than the main modal */
-        }}>
-          <div style={{
-            backgroundColor: 'white', padding: '24px', borderRadius: '12px',
-            width: '90%', maxWidth: '450px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)'
-          }}>
-            {/* Header */}
-            <div style={{
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              marginBottom: '16px', paddingBottom: '12px', borderBottom: '1px solid #e2e8f0'
-            }}>
-              <h3 style={{ margin: 0, fontSize: '1.1rem', color: '#1e293b', fontWeight: '700' }}>
-                Ingredient Matching Tips
-              </h3>
-              <button
-                onClick={() => setShowIngredientTips(false)}
-                style={{
-                  background: 'none', border: 'none', fontSize: '1.5rem',
-                  cursor: 'pointer', color: '#94a3b8', lineHeight: '1', padding: '0'
-                }}
-              >
-                ×
-              </button>
-            </div>
-
-            {/* Body */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', color: '#334155', fontSize: '13px', lineHeight: '1.5' }}>
-              <p style={{ margin: 0 }}>As there are several ingredients with similar names, in order to match the reference of USDA:</p>
-              <ul style={{ margin: 0, paddingLeft: '20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <li>For tap water write <strong>'Beverages, water, tap, drinking'</strong> (e.g. <em>1 liter of Beverages, water, tap, drinking</em>).</li>
-                <li>For bottle water write <strong>'Water, bottled, non-carbonated, naya'</strong> (e.g. <em>1 Water, bottled, non-carbonated, naya</em>).</li>
-                <li>If there is any other ingredient that is not matching your request, first check the name in the <strong>Search 'Foods'</strong> menu.</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* --- EXISTING CHAT CONTAINER --- */}
-      <main className="chat-container">
-        <div className="messages-list">
-          {messages.length === 0 && (
-            <div className="empty-state">
-              <div className="empty-icon">🥦</div>
-              <h2>How can I help you today?</h2>
-              <p>Try: "What are the macronutrients of an apple?" or "Show me high protein foods."</p>
-            </div>
-          )}
+        {/* --- CHAT MESSAGES WINDOW --- */}
+        <div className="chat-window" style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
 
           {messages.map((msg, idx) => (
             <div key={idx} className={`message-wrapper ${msg.role}`}>
@@ -860,6 +535,7 @@ CRITICAL INSTRUCTIONS:
                 {msg.role === 'assistant' && (
                   <div className="assistant-avatar">AI</div>
                 )}
+
                 <div className="message-bubble">
                   <div className="message-text">{msg.content}</div>
 
@@ -879,6 +555,7 @@ CRITICAL INSTRUCTIONS:
                               </div>
                             )}
 
+                            {/* --- PLOT RENDERING --- */}
                             {(type === 'bar' || type === 'pie') && (
                               <div className="plot-container">
                                 <Plot
@@ -917,6 +594,7 @@ CRITICAL INSTRUCTIONS:
                               </div>
                             )}
 
+                            {/* --- STANDARD TABLE RENDERING (ONLY ONE BLOCK NOW!) --- */}
                             {type === 'table' && (
                               <div className="table-container">
                                 <Expander
@@ -924,24 +602,25 @@ CRITICAL INSTRUCTIONS:
                                   icon={<Table size={16} />}
                                   defaultOpen={msg.visual_type.length === 1 || msg.visual_type.includes('pie')}
                                 >
-                                  <TableDisplay data={msg.data} />
+                                  {/* Unpack smuggled dictionary, or fallback safely to raw data */}
+                                  <TableDisplay data={msg.fig[i]?.table_data || msg.data} />
                                 </Expander>
                               </div>
                             )}
 
-                            {/* --- NEW: DAILY DIARY RENDERING --- */}
+                            {/* --- DAILY DIARY RENDERING --- */}
                             {type === 'diary' && (
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', width: '100%' }}>
-                                {/* Table 1: The Summed Totals (Open by default) */}
+                                {/* Table 1: The Summed Totals */}
                                 <div className="table-container">
                                   <Expander title="Daily Nutrient Totals" icon={<Table size={16} />} defaultOpen={true}>
-                                    <TableDisplay data={msg.totals} />
+                                    <TableDisplay data={msg.fig[msg.fig.length - 1]?.totals || msg.totals} />
                                   </Expander>
                                 </div>
-                                {/* Table 2: The Meal-by-Meal Breakdown (Closed by default) */}
+                                {/* Table 2: The Meal-by-Meal Breakdown */}
                                 <div className="table-container">
                                   <Expander title="Detailed Meal Breakdown" icon={<Table size={16} />} defaultOpen={false}>
-                                    <TableDisplay data={msg.data} />
+                                    <TableDisplay data={msg.fig[msg.fig.length - 1]?.data || msg.data} />
                                   </Expander>
                                 </div>
                               </div>
@@ -969,6 +648,7 @@ CRITICAL INSTRUCTIONS:
               </div>
             </div>
           ))}
+
           {loading && (
             <div className="message-wrapper assistant">
               <div className="message-content">
@@ -980,55 +660,432 @@ CRITICAL INSTRUCTIONS:
               </div>
             </div>
           )}
-          <div ref={chatEndRef} />
 
-          {/* --- NEW: FLOATING INFO ICON (Bottom Left) --- */}
-          <button
-            onClick={() => setShowInfo(true)}
-            style={{
-              position: 'fixed',
-              bottom: '24px',
-              left: '24px',
-              width: '36px',
-              height: '36px',
-              borderRadius: '50%',
-              backgroundColor: '#f8fafc',
-              color: '#155289',
-              border: '1px solid #cbd5e1',
-              boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
-              fontSize: '1.1rem',
-              fontWeight: 'bold',
-              fontStyle: 'italic',
-              cursor: 'pointer',
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
-              zIndex: 900,        /* Keeps it above other elements but below modals */
-              fontFamily: 'serif' /* Gives the 'i' that classic informational look */
-            }}
-            title="About our data"
-          >
-            i
-          </button>
+          <div ref={chatEndRef} />
         </div>
+
+        {/* --- INPUT BOX & BOTTOM CHIPS --- */}
+        <footer className="footer">
+          <form onSubmit={handleSubmit} className="input-container">
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="E.g., What are the top 10 foods highest in protein?"
+              disabled={loading}
+            />
+            <button type="submit" disabled={loading || !query.trim()}>
+              <Send size={20} />
+            </button>
+          </form>
+
+          {/* --- BOTTOM HELPERS CHIPS --- */}
+          <div className="bottom-helpers" ref={helpersRef}>
+            {Object.entries(helperQueries).map(([category, queries]) => (
+              <div key={category} className="helper-chip-wrapper">
+                <button
+                  type="button"
+                  className="helper-chip"
+                  onClick={() => setExpandedCategory(expandedCategory === category ? null : category)}
+                >
+                  {getCategoryIcon(category)}
+                  {category}
+                </button>
+
+                {expandedCategory === category && (
+                  <div className="helper-flyout">
+                    {queries.map((q, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        className="flyout-item"
+                        onClick={() => {
+                          if (q === "🔍 Search Food Database...") {
+                            setActiveModal('foods');
+                          } else {
+                            setQuery(q);
+                          }
+                          setExpandedCategory(null);
+                        }}
+                      >
+                        {q}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </footer>
       </main>
 
-      <footer className="footer">
-        {/* --- ALWAYS VISIBLE ACTIVE FILTER INDICATOR --- */}
-        <form onSubmit={handleSubmit} className="input-container">
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="E.g., What are the top 10 foods highest in protein?"
-            disabled={loading}
-          />
-          {/* Ensure this button tag is present! */}
-          <button type="submit" disabled={loading || !query.trim()}>
-            <Send size={20} />
-          </button>
-        </form>
-      </footer>
+
+      {/* ========================================= */}
+      {/* 3. FLOATING MODALS & ICONS                */}
+      {/* ========================================= */}
+
+      {/* --- DYNAMIC SHARED MODAL (Filters/Search) --- */}
+      {activeModal && (
+        <div className="modal-overlay" onClick={() => setActiveModal(null)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()}>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', paddingBottom: '12px', borderBottom: '1px solid #e2e8f0' }}>
+              <h2 style={{ margin: 0, fontSize: '1.25rem', color: '#1e293b', fontWeight: '700' }}>
+                {activeModal === 'food_type' && 'Filter by Food Type'}
+                {activeModal === 'diet_type' && 'Filter by Diet Type'}
+                {activeModal === 'size' && 'Indicate Food Size Type'}
+                {activeModal === 'foods' && 'Search Foods'}
+                {activeModal === 'vitamins' && 'Search Vitamins'}
+                {activeModal === 'minerals' && 'Search Minerals'}
+                {activeModal === 'daily_food' && 'Daily Food Diary'}
+              </h2>
+              <button
+                onClick={() => setActiveModal(null)}
+                style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: '#94a3b8', lineHeight: '1', padding: '0' }}
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="modal-body">
+              {/* Food Type Filter UI */}
+              {activeModal === 'food_type' && (
+                <ul className="grid-list single-col">
+                  {FOOD_TYPES.map(type => (
+                    <li
+                      key={type.value}
+                      title={
+                        type.label === 'Foundation Food' ? "Foundation Foods are basic, unbranded ingredients..."
+                          : type.label === 'Survey Food' ? "Survey Foods reflect what people actually eat..."
+                            : type.label === 'Branded Food' ? "Branded Foods are commercially packaged products..."
+                              : ""
+                      }
+                      onClick={() => handleItemSelect(type.label, 'food_type')}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      {type.label}
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {/* Diet Type Filter UI */}
+              {activeModal === 'diet_type' && (
+                <ul className="grid-list single-col">
+                  {DIET_TYPES.map(type => (
+                    <li key={type.value} onClick={() => handleItemSelect(type.label, 'diet_type')} style={{ cursor: 'pointer' }}>
+                      {type.label}
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {/* Size Filter UI */}
+              {activeModal === 'size' && (
+                <ul className="grid-list single-col">
+                  {SIZE_TYPES.map(type => (
+                    <li key={type.value} onClick={() => handleItemSelect(type.label, 'size')} style={{ cursor: 'pointer' }}>
+                      {type.label}
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {/* Search Foods UI */}
+              {activeModal === 'foods' && (
+                <div className="food-search-container">
+                  <input
+                    type="text"
+                    placeholder="Type to search the database..."
+                    value={foodSearchQuery}
+                    onChange={handleFoodSearch}
+                    className="food-search-input"
+                  />
+                  {isSearching && <div className="search-status">Searching database...</div>}
+                  <ul className="search-results-list">
+                    {foodSearchResults.map(food => (
+                      <li key={food.fdc_id} onClick={() => handleItemSelect(food.name)}>
+                        {food.name}
+                      </li>
+                    ))}
+                    {foodSearchQuery.length >= 3 && foodSearchResults.length === 0 && !isSearching && (
+                      <li className="no-results">No foods found.</li>
+                    )}
+                  </ul>
+                </div>
+              )}
+
+              {/* Vitamins UI */}
+              {activeModal === 'vitamins' && (
+                <ul className="grid-list">
+                  {VITAMINS_LIST.map(item => (
+                    <li key={item} onClick={() => handleItemSelect(item, 'vitamins')} style={{ cursor: 'pointer' }}>
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {/* Minerals UI */}
+              {activeModal === 'minerals' && (
+                <ul className="grid-list">
+                  {MINERALS_LIST.map(item => (
+                    <li key={item} onClick={() => handleItemSelect(item, 'minerals')} style={{ cursor: 'pointer' }}>
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {/* Daily Food UI */}
+              {activeModal === 'daily_food' && (
+                <div style={{ padding: '0px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  <p style={{ margin: 0, fontSize: '12px', color: '#64748b', marginBottom: '8px' }}>
+                    Type what you eat and drink naturally. One ingredient per line. <br />
+                    Click + to add a new ingredient.
+                    <button
+                      type="button"
+                      onClick={() => setShowIngredientTips(true)}
+                      style={{ background: 'none', border: 'none', padding: 0, margin: '0 0 0 4px', color: '#3b82f6', textDecoration: 'underline', cursor: 'pointer', fontSize: '12px' }}
+                    >
+                      Read this
+                    </button>
+                  </p>
+
+                  {['breakfast', 'lunch', 'afternoon', 'dinner'].map((meal) => {
+                    const placeholders = {
+                      breakfast: 'e.g., 1 slice of bread',
+                      lunch: 'e.g., 150 gr rice',
+                      afternoon: 'e.g., 1 cup of tea',
+                      dinner: 'e.g., 100 gr broccoli'
+                    };
+
+                    return (
+                      <div key={meal}>
+                        <label style={{ display: 'block', textTransform: 'capitalize', marginBottom: '4px', fontSize: '14px', fontWeight: 'bold' }}>
+                          {meal === 'afternoon' ? 'Afternoon snack' : meal}
+                        </label>
+                        <div style={{ backgroundColor: '#333333', borderRadius: '8px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          {dailyMeals[meal].map((ingredient, index) => (
+                            <input
+                              key={index}
+                              type="text"
+                              value={ingredient}
+                              onChange={(e) => handleIngredientChange(meal, index, e.target.value)}
+                              placeholder={index === 0 ? placeholders[meal] : ""}
+                              style={{ width: '100%', backgroundColor: 'transparent', border: 'none', borderBottom: '1px solid #718096', color: 'white', padding: '4px', fontSize: '14px', outline: 'none' }}
+                            />
+                          ))}
+                          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '4px' }}>
+                            <button
+                              type="button"
+                              onClick={() => addIngredientLine(meal)}
+                              style={{ color: '#cbd5e1', backgroundColor: '#475569', borderRadius: '50%', width: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: 'none', fontSize: '16px', lineHeight: '1' }}
+                              title="Add ingredient line"
+                            >
+                              +
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  <button
+                    onClick={() => {
+                      submitDailyFood();
+                      setActiveModal(null);
+                    }}
+                    style={{ backgroundColor: '#155289', color: 'white', padding: '10px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer', marginTop: '8px' }}
+                  >
+                    Calculate Daily Nutrients
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      {/* --- USER PROFILE MODAL --- */}
+      {showProfile && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+          <div style={{ backgroundColor: 'white', padding: '24px', borderRadius: '12px', width: '90%', maxWidth: '400px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)' }}>
+
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', paddingBottom: '12px', borderBottom: '1px solid #e2e8f0' }}>
+              <h2 style={{ margin: 0, fontSize: '1.25rem', color: '#1e293b', fontWeight: '700' }}>
+                User's Biology Profile
+              </h2>
+              <button
+                onClick={() => setShowProfile(false)}
+                style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: '#94a3b8', lineHeight: '1' }}
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Form Body */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '14px', fontWeight: 'bold', marginBottom: '4px' }}>Gender</label>
+                <select
+                  value={userProfile.gender}
+                  onChange={(e) => setUserProfile({ ...userProfile, gender: e.target.value })}
+                  style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                >
+                  <option value="Female">Female</option>
+                  <option value="Male">Male</option>
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: 'block', fontSize: '14px', fontWeight: 'bold', marginBottom: '4px' }}>Age (yrs)</label>
+                  <input
+                    type="number" value={userProfile.age}
+                    onChange={(e) => setUserProfile({ ...userProfile, age: Number(e.target.value) })}
+                    style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: 'block', fontSize: '14px', fontWeight: 'bold', marginBottom: '4px' }}>Height (cm)</label>
+                  <input
+                    type="number" value={userProfile.height}
+                    onChange={(e) => setUserProfile({ ...userProfile, height: Number(e.target.value) })}
+                    style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '14px', fontWeight: 'bold', marginBottom: '4px' }}>Weight (kg)</label>
+                <input
+                  type="number" value={userProfile.weight}
+                  onChange={(e) => setUserProfile({ ...userProfile, weight: Number(e.target.value) })}
+                  style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '14px', fontWeight: 'bold', marginBottom: '4px' }}>Activity Level</label>
+                <select
+                  value={userProfile.activity}
+                  onChange={(e) => setUserProfile({ ...userProfile, activity: Number(e.target.value) })}
+                  style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                >
+                  <option value={1.2}>Sedentary (Little or no exercise)</option>
+                  <option value={1.375}>Lightly active (Light exercise 1-3 days/week)</option>
+                  <option value={1.55}>Moderately active (Moderate exercise 3-5 days/week)</option>
+                  <option value={1.725}>Very active (Hard exercise 6-7 days/week)</option>
+                </select>
+              </div>
+
+              <button
+                onClick={() => setShowProfile(false)}
+                style={{ marginTop: '10px', width: '100%', padding: '12px', backgroundColor: '#155289', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}
+              >
+                Save Profile
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      {/* --- INFORMATION MODAL ("i" Icon) --- */}
+      {showInfo && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+          <div style={{ backgroundColor: 'white', padding: '24px', borderRadius: '12px', width: '90%', maxWidth: '450px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)' }}>
+
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', paddingBottom: '12px', borderBottom: '1px solid #e2e8f0' }}>
+              <h2 style={{ margin: 0, fontSize: '1.25rem', color: '#1e293b', fontWeight: '700' }}>
+                About Nutrition AI
+              </h2>
+              <button
+                onClick={() => setShowInfo(false)}
+                style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: '#94a3b8', lineHeight: '1', padding: '0' }}
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Body */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', color: '#334155', fontSize: '14px', lineHeight: '1.6' }}>
+              <p style={{ margin: 0 }}>
+                <strong>Data Source:</strong> The nutritional data provided in this application is sourced directly from the <strong>United States Department of Agriculture (USDA)</strong> FoodData Central database, ensuring highly accurate and scientifically validated food profiles.
+              </p>
+              <p style={{ margin: 0 }}>
+                <strong>Biological Calculations:</strong> Your personalized daily targets are calculated using gold-standard clinical guidelines. Caloric and macronutrient needs use the <strong>Mifflin-St Jeor equation</strong> (adjusted for activity level), while Vitamin and Mineral targets are strictly based on the <strong>NIH Dietary Reference Intakes (DRIs)</strong> tailored to your specific age and gender.
+              </p>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* --- INGREDIENT TIPS MODAL --- */}
+      {showIngredientTips && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 10000 }}>
+          <div style={{ backgroundColor: 'white', padding: '24px', borderRadius: '12px', width: '90%', maxWidth: '450px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
+
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', paddingBottom: '12px', borderBottom: '1px solid #e2e8f0' }}>
+              <h3 style={{ margin: 0, fontSize: '1.1rem', color: '#1e293b', fontWeight: '700' }}>
+                Ingredient Matching Tips
+              </h3>
+              <button
+                onClick={() => setShowIngredientTips(false)}
+                style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: '#94a3b8', lineHeight: '1', padding: '0' }}
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Body */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', color: '#334155', fontSize: '13px', lineHeight: '1.5' }}>
+              <p style={{ margin: 0 }}>As there are several ingredients with similar names, in order to match the reference of USDA:</p>
+              <ul style={{ margin: 0, paddingLeft: '20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <li>For tap water write <strong>'Beverages, water, tap, drinking'</strong> (e.g. <em>1 liter of Beverages, water, tap, drinking</em>).</li>
+                <li>For bottle water write <strong>'Water, bottled, non-carbonated, naya'</strong> (e.g. <em>1 Water, bottled, non-carbonated, naya</em>).</li>
+                <li>If there is any other ingredient that is not matching your request, first check the name in the <strong>Search 'Foods'</strong> menu.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- FLOATING INFO ICON (Bottom Left) --- */}
+      <button
+        onClick={() => setShowInfo(true)}
+        style={{
+          position: 'fixed',
+          bottom: '24px',
+          left: '24px',
+          width: '36px',
+          height: '36px',
+          borderRadius: '50%',
+          backgroundColor: '#f8fafc',
+          color: '#155289',
+          border: '1px solid #cbd5e1',
+          boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+          fontSize: '1.1rem',
+          fontWeight: 'bold',
+          fontStyle: 'italic',
+          cursor: 'pointer',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 900,        /* Keeps it above other elements but below modals */
+          fontFamily: 'serif' /* Gives the 'i' that classic informational look */
+        }}
+        title="About our data"
+      >
+        i
+      </button>
+
     </div>
   );
 }

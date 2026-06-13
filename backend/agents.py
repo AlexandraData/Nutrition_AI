@@ -5,6 +5,7 @@
 # ============================================
 # 1. IMPORTS
 # ============================================
+from PIL import TiffImagePlugin
 import os
 import pandas as pd
 import plotly.express as px
@@ -21,6 +22,7 @@ import re
 from prompt_librarian import get_librarian_prompt
 from prompt_visual import VISUAL_CONTEXT
 from prompt_summary import get_summary_prompt
+from langgraph.checkpoint.memory import MemorySaver
 
 # ============================================
 # 2. MAP NUTRIENTS
@@ -221,12 +223,28 @@ class State(TypedDict):
 def librarian_node(state: State):
     """Generates SQL query from user input."""
 
-    # Call the prompt function directly
     sys_prompt = get_librarian_prompt() 
     
+    # --- 1. NEW: MEMORY CONTEXT RETRIEVAL ---
+    # We pull the query and SQL from the LAST turn (saved by LangGraph checkpointer)
+    past_query = state.get("past_query", "")
+    past_sql = state.get("past_sql", "")
+    
+    memory_context = ""
+    if past_query and past_sql:
+        memory_context = (
+            f"--- PREVIOUS CONVERSATION CONTEXT ---\n"
+            f"User Previously Asked: {past_query}\n"
+            f"You Generated This SQL: {past_sql}\n"
+            f"-------------------------------------\n"
+            f"If the New User Query is a follow-up (e.g., 'what about duck?', 'filter to vegan'), "
+            f"modify the previous SQL to answer the new question. If it is a brand new topic, ignore the context.\n\n"
+        )
+
+    # --- 2. Inject memory into the HumanMessage ---
     messages = [
         SystemMessage(content=sys_prompt),
-        HumanMessage(content=state["query"])
+        HumanMessage(content=f"{memory_context}New User Query: {state['query']}")
     ]
 
     # Instantiate the LLM to generate SQL query
@@ -240,19 +258,21 @@ def librarian_node(state: State):
     response = llm.invoke(messages)
     sql_query = response.content.strip()
     
-    # Clean up markdown if the LLM adds it
+   # Clean up markdown if the LLM adds it
     if sql_query.startswith("```sql"):
         sql_query = sql_query[6:]
     if sql_query.startswith("```"):
         sql_query = sql_query[3:]
+
     if sql_query.endswith("```"):
         sql_query = sql_query[:-3]
-        
-    return {"sql_query": sql_query.strip(), "error": None}
+
+    return {"sql_query": sql_query.strip(), "error": None} 
 
 # ====================================================
 #  8. DATA RETRIEVAL NODE
 # ====================================================
+
 def data_retrieval_node(state: State):
     """Executes the SQL query against BigQuery."""
     sql_query = state.get("sql_query")
@@ -261,9 +281,7 @@ def data_retrieval_node(state: State):
         return {"error": "No SQL query generated."}
     
     # --- CATCH OUT-OF-DOMAIN TEXT ---
-    # If the string doesn't start with SELECT or WITH, it is our refusal message
     if not sql_query.strip().upper().startswith(("SELECT", "WITH")):
-        # Add "sql_query": None to hide the frontend dropdown!
         return {"error": sql_query.strip(), "data": None, "sql_query": None}
 
     try:
@@ -271,12 +289,12 @@ def data_retrieval_node(state: State):
         
         # --- CATCH EMPTY RESULTS EARLY ---
         if df.empty:
-            return {"error": "No data found for this query. Try adjusting your spelling or using simpler terms.", "data": None}
+            return {"error": "No data found for this query. Try adjusting your spelling or simpler terms.", "data": None}
         
         # --- TRAFFIC LIGHT: AUTOMATIC ROUTING ---
         if state.get("is_daily_log", False) or "meal_name" in df.columns:
             try:
-                # 0. Ultimate Column Safety Net (Aggressive Renaming)
+                # 0. Ultimate Column Safety Net
                 col_map = {}
                 for c in df.columns:
                     cl = str(c).lower().strip()
@@ -294,12 +312,9 @@ def data_retrieval_node(state: State):
                     df = df.rename(columns=col_map)
 
                 # 1. Fill missing critical columns
-                if 'unit_name' not in df.columns:
-                    df['unit_name'] = ''
-                if 'food_description' not in df.columns:
-                    df['food_description'] = 'Unknown Food'
-                if 'nutrient_name' not in df.columns:
-                    df['nutrient_name'] = 'Unknown Nutrient'
+                if 'unit_name' not in df.columns: df['unit_name'] = ''
+                if 'food_description' not in df.columns: df['food_description'] = 'Unknown Food'
+                if 'nutrient_name' not in df.columns: df['nutrient_name'] = 'Unknown Nutrient'
                 if 'amount' not in df.columns:
                     num_cols = [c for c in df.select_dtypes(include=['number']).columns if 'id' not in c.lower() and 'portion' not in c.lower()]
                     if num_cols:
@@ -349,17 +364,13 @@ def data_retrieval_node(state: State):
                 df_totals['Total Amount'] = df_totals.apply(lambda row: format_eu_amount(row[amount_col], row.get('unit_name', '')), axis=1)
 
                 # 4. Process Macros
-                # --- NEW GLOBAL SORTING LOGIC ---
                 macro_order = ['Energy', 'Water', 'Total Carbohydrate', 'of which Sugars', 'of which Dietary Fiber', 'Protein', 'Total Fat', 'of which Saturated Fat', 'of which Trans Fat', 'of which Polyunsaturated Fat', 'of which Monounsaturated Fat']
                 macro_order_lower = [m.lower() for m in macro_order]
 
                 def get_global_sort_key(name):
                     n = str(name).lower().strip()
-                    # Priority 1: Macros (Sorted by the predefined list order)
-                    if n in macro_order_lower:
-                        return (1, macro_order_lower.index(n), n)
+                    if n in macro_order_lower: return (1, macro_order_lower.index(n), n)
                     
-                    # Priority 2: Vitamins (Grouped and ordered by Vitamin Type)
                     if 'vitamin a' in n or 'carotene' in n or 'retinol' in n: return (2, 1, n)
                     if 'vitamin b1' in n or 'thiamin' in n: return (2, 2, n)
                     if 'vitamin b2' in n or 'riboflavin' in n: return (2, 3, n)
@@ -375,11 +386,8 @@ def data_retrieval_node(state: State):
                     if 'vitamin e' in n or 'tocopherol' in n: return (2, 13, n)
                     if 'vitamin k' in n or 'phylloquinone' in n: return (2, 14, n)
                     
-                    # Priority 3: Minerals and everything else (Sorted alphabetically)
                     return (3, 99, n)
 
-                # --- 1. Sort the "Detailed Meal Breakdown" Table (df) ---
-                # This ensures the details group nicely by Meal -> Food -> Proper Nutrient Order
                 if 'nutrient_name' in df.columns:
                     df['nutrient_name'] = df['nutrient_name'].apply(apply_all_nutrient_aliases)
                     df['sort_key'] = df['nutrient_name'].apply(get_global_sort_key)
@@ -387,42 +395,28 @@ def data_retrieval_node(state: State):
                     sort_cols = []
                     
                     if 'meal_name' in df.columns:
-                        # 1. Standardize meal names (e.g., 'lunch' becomes 'Lunch')
                         df['meal_name'] = df['meal_name'].astype(str).str.title()
-                        
-                        # 2. Define the exact chronological meal order
                         meal_order = ['Breakfast', 'Lunch', 'Afternoon Snack', 'Dinner']
-                        
-                        # 3. Create a sort key for the meals (unknown meals go to the bottom)
                         df['meal_sort_key'] = df['meal_name'].apply(lambda x: meal_order.index(x) if x in meal_order else 99)
                         
                         sort_cols.extend(['meal_sort_key', 'food_description'])
                         
-                        # 4. Reorder the DataFrame columns so 'meal_name' is always first
                         cols = df.columns.tolist()
                         cols.insert(0, cols.pop(cols.index('meal_name')))
                         df = df[cols]
                     else:
                         sort_cols.append('food_description')
                         
-                    # 5. Add the nutrient sort key to the end of the sorting logic
                     sort_cols.append('sort_key')
-                    
-                    # 6. Apply the multi-level sort
                     df = df.sort_values(sort_cols, ascending=True)
                     
-                    # 7. Clean up the temporary sorting columns
                     cols_to_drop = ['sort_key']
-                    if 'meal_sort_key' in df.columns:
-                        cols_to_drop.append('meal_sort_key')
+                    if 'meal_sort_key' in df.columns: cols_to_drop.append('meal_sort_key')
                     df = df.drop(columns=cols_to_drop)
 
-                # --- 2. Sort the "Daily Nutrient Totals" Table (df_totals) ---
                 df_totals['sort_key'] = df_totals['nutrient_name'].apply(get_global_sort_key)
                 df_totals = df_totals.sort_values('sort_key', ascending=True)
 
-                # --- 3. Split data for the UI Charts ---
-                # Note: Plotly draws horizontal bars from bottom-to-top, so we must reverse the chart data (ascending=False)
                 df_macros = df_totals[df_totals['sort_key'].apply(lambda x: x[0] == 1)].copy()
                 df_macros = df_macros.sort_values('sort_key', ascending=False) 
 
@@ -432,7 +426,6 @@ def data_retrieval_node(state: State):
                 figs = []
                 v_types = []
 
-                # --- CHART GENERATION ---
                 if not df_macros.empty:
                     chart_macros = df_macros[df_macros['pct_goal'] < 999000]
                     fig_mac = go.Figure(go.Bar(
@@ -443,9 +436,7 @@ def data_retrieval_node(state: State):
                         text=chart_macros['Total Amount'],
                         textposition='auto'
                     ))
-
                     fig_mac.add_vline(x=100, line_dash="dash", line_color="#ef4444", line_width=2)
-
                     max_x = max(chart_macros['pct_goal'].max() if not chart_macros.empty else 0, 130)
                     fig_mac.update_layout(title="Daily Total: Macronutrients (% of Goal)", margin=dict(l=180, r=60, t=40, b=20), xaxis_title="% of Daily Target", xaxis=dict(range=[0, max_x * 1.20]))
                     figs.append(fig_mac)
@@ -461,43 +452,43 @@ def data_retrieval_node(state: State):
                         text=chart_micros['Total Amount'],
                         textposition='auto'
                     ))
-
                     fig_mic.add_vline(x=100, line_dash="dash", line_color="#ef4444", line_width=2)
-
                     max_x = max(chart_micros['pct_goal'].max() if not chart_micros.empty else 0, 130)
                     fig_mic.update_layout(title="Daily Total: Vitamins & Minerals (% of Goal)", margin=dict(l=200, r=60, t=40, b=20), xaxis_title="% of Daily Target", xaxis=dict(range=[0, max_x * 1.20]))
                     figs.append(fig_mic)
                     v_types.append("bar")
 
                 v_types.append("diary")
-
-                # --- PREPARE THE CLEAN TABLE ---
                 df_totals_clean = df_totals[['nutrient_name', 'Total Amount', 'Target', '% of Goal']].copy()
                 df_totals_clean.columns = ['Nutrient Name', 'Amount', 'Target', '% of Goal']
 
+            # --- 🔴 CHANGED: CONVERT EVERYTHING TO DICTS FOR MEMORY SAFETY ---
+            # --- 🔴 CHANGED: PACK DIARY TABLES INTO 'FIG' TO BYPASS FASTAPI FILTERING ---
+                serialized_figs = [json.loads(f.to_json()) for f in figs]
+                
+                # Append the tables as a dictionary to the end of the fig array
+                serialized_figs.append({
+                    "is_diary_tables": True,
+                    "totals": df_totals_clean.fillna("").to_dict(orient="records"),
+                    "data": df.fillna("").to_dict(orient="records")
+                })
+
                 return {
                     "visual_type": v_types,
-                    "data": df,
-                    "totals": df_totals_clean,
-                    "fig": figs
+                    "data": df.fillna("").to_dict(orient="records"),
+                    "totals": df_totals_clean.fillna("").to_dict(orient="records"),
+                    "fig": serialized_figs 
                 }
 
             except Exception as e:
                 print(f"Diary Math Error: {e}")
-                
-                # ULTIMATE SAFETY NET: If math fails, forcefully convert any categorical columns
-                # back to strings so main.py never crashes!
-                for col in df.select_dtypes(include=['category']).columns:
-                    df[col] = df[col].astype(str)
-                
-                return {"data": df, "error": f"Could not calculate daily targets: {str(e)}"}
+                # --- 🔴 CHANGED: RETURN AS SAFE DICT ---
+                return {"data": df.fillna("").to_dict(orient="records"), "error": f"Could not calculate daily targets: {str(e)}"}
         
         else:
-            # --- GENERAL SEARCH & RANKING (TYPE A & B) ---
-            # Bypass the diary math entirely and pass it straight to the Visualizer
-            return {"data": df, "error": None}
+            # --- 🔴 CHANGED: RETURN AS SAFE DICT ---
+            return {"data": df.fillna("").to_dict(orient="records"), "error": None}
 
-    # ---  MISSING OUTER EXCEPT BLOCK ---
     except Exception as e:
         print(f"Database Query Error: {e}")
         return {"error": f"Failed to retrieve data from BigQuery: {str(e)}"}
@@ -512,10 +503,18 @@ def visualizer_node(state: State):
     if "diary" in (state.get("visual_type") or []):
         return {}
 
-    df = state.get("data")
+    raw_data = state.get("data")
     error = state.get("error")
     
-    if error or df is None or df.empty:
+    # --- 🔴 CHANGED: Convert dictionary back to DataFrame if needed ---
+    if isinstance(raw_data, list) and len(raw_data) > 0 and isinstance(raw_data[0], dict):
+        df = pd.DataFrame(raw_data)
+    elif isinstance(raw_data, pd.DataFrame):
+        df = raw_data
+    else:
+        df = pd.DataFrame()
+    
+    if error or df.empty:
         err_msg = error or "No data found for this query. Try adjusting your spelling or using simpler terms (e.g., 'carrots' instead of 'carrot, raw')."
         return {"visual_type": ["none"], "fig": [None], "error": err_msg}
 
@@ -599,7 +598,6 @@ def visualizer_node(state: State):
             if v_type in ["bar", "macro_bar", "micro_bar"]:
                 name_col = config.get("y_col")
 
-                # Logic to determine the correct column for the chart
                 if "nutrient_name" in df.columns and "food_description" in df.columns:
                     if df["food_description"].nunique() == 1 and df["nutrient_name"].nunique() > 1:
                         name_col = "nutrient_name"
@@ -609,7 +607,6 @@ def visualizer_node(state: State):
                     string_cols = df.select_dtypes(include=['object', 'string']).columns
                     name_col = string_cols[0] if len(string_cols) > 0 else df.columns[0]
 
-                # Logic to determine the correct column for the chart values
                 val_col = config.get("x_col")
                 if val_col == "fdc_id":
                     val_col = None
@@ -621,35 +618,28 @@ def visualizer_node(state: State):
                         num_cols = [col for col in df.select_dtypes(include=['number']).columns if col != 'fdc_id']
                         val_col = num_cols[0] if len(num_cols) > 0 else df.columns[0]
 
-                # --- Data Preparation ---
                 temp_df = df.copy()
                 macro_order = ['Energy', 'Water', 'Total Carbohydrate', 'of which Sugars', 'of which Dietary Fiber', 'Protein', 'Total Fat', 'of which Saturated Fat', 'of which Trans Fat', 'of which Monounsaturated Fat', 'of which Polyunsaturated Fat']
 
-                # --- Conditional Styling & Data Filtering ---
                 if v_type == "macro_bar":
                     color = "#155289"
                     title = config.get("title_macro", "Macronutrients")
                     temp_df = temp_df[temp_df[name_col].isin(macro_order)]
                     
-                    # Exclude zeros
                     temp_df = temp_df[temp_df[val_col].round(1) > 0]
                     if temp_df.empty: continue
                     
-                    # Sort macro (Reverse because Plotly draws bottom to top)
                     temp_df['sort_idx'] = temp_df[name_col].apply(lambda x: macro_order.index(x) if x in macro_order else 99)
                     df_sorted = temp_df.sort_values('sort_idx', ascending=False)
 
-                # --- Macro Bar Chart Creation ---
                 elif v_type == "micro_bar":
                     color = "#95AAD3"
                     title = config.get("title_micro", "Vitamins and Minerals")
                     temp_df = temp_df[~temp_df[name_col].isin(macro_order)]
                     
-                    # Exclude zeros
                     temp_df = temp_df[temp_df[val_col].round(1) > 0]
                     if temp_df.empty: continue
                     
-                    # Sort micro (Vitamins A, B1, B2, B3, B5, B6, B7, B9, B12, C, D, E, K)
                     def get_micro_sort(name):
                         n = str(name).lower()
                         if 'vitamin a' in n or 'carotene' in n or 'retinol' in n: return 1
@@ -672,51 +662,39 @@ def visualizer_node(state: State):
                     df_sorted = temp_df.sort_values(['sort_idx', name_col], ascending=[False, False])
 
                 else:
-                    # Standard comparative bar graph
                     color = "#95AAD3" 
                     title = config.get("title", "Nutrient Data")
                     temp_df = temp_df[temp_df[val_col].round(1) > 0]
                     if temp_df.empty: continue
                     df_sorted = temp_df.sort_values(by=val_col, ascending=True)
 
-                # Format labels securely (don't break our new aliases)
                 df_sorted[name_col] = df_sorted[name_col].apply(lambda x: x if x in protected_labels else format_label(x))
                 
-                # Calculate percentage
                 total = df_sorted[val_col].sum()
                 df_sorted['pct'] = (df_sorted[val_col] / total * 100).round(1) if total > 0 else 0
                 
                 def get_bar_label(row):
                     u = str(row['unit_name']).lower().strip() if 'unit_name' in row and pd.notnull(row['unit_name']) else ""
                     unit_str = f" {u}" if u else ""
-                    
                     us_format = f"{row[val_col]:,.2f}" 
                     eu_format = us_format.replace(',', 'X').replace('.', ',').replace('X', '.')
-                    
-                    # NEW: Drop percentage for Energy!
                     if str(row[name_col]).lower() == 'energy':
                         return f"{eu_format}{unit_str}"
                     else:
                         return f"{eu_format}{unit_str} ({row['pct']}%)"
                 
-                # Add text labels to bars
                 df_sorted['display_text'] = df_sorted.apply(get_bar_label, axis=1)
-                
-                # Dynamic Height Calculation
                 calc_height = max(400, len(df_sorted) * 25)
                 
-                # Format labels securely (don't break our new aliases)
                 x_label = format_label(val_col)
                 y_label = format_label(name_col)
                 display_title = format_label(title)
                 
-                # --- OVERRIDE TITLE CASING ---
                 if display_title.lower() == "vitamins and minerals":
                     display_title = "Vitamins and Minerals"
                 elif display_title.lower() == "macronutrients":
                     display_title = "Macronutrients"
 
-                # --- Create the Bar Chart ---
                 fig = go.Figure(go.Bar(
                     x=df_sorted[val_col].tolist(),
                     y=df_sorted[name_col].tolist(),
@@ -727,11 +705,9 @@ def visualizer_node(state: State):
                     name=''
                 ))
                 
-                # Dynamic Axis Scaling
                 max_val = df_sorted[val_col].max()
                 buffer_val = max_val * 1.30
 
-                # --- Styling & Polish ---
                 fig.update_layout(
                     title=display_title,
                     xaxis=dict(range=[0, buffer_val], title=x_label),
@@ -747,15 +723,12 @@ def visualizer_node(state: State):
                 fig.update_xaxes(title_font=dict(size=12, color="#242424"), tickfont_color="#242424", automargin=True)
                 fig.update_yaxes(title_font=dict(size=12, color="#242424"), tickfont_color="#242424", automargin=True)
 
-                # --- Append Figure ---
                 final_types.append("bar")
                 final_figs.append(fig)
 
-            # --- Pie Chart Creation ---
             elif v_type == "pie":
                 name_col = config.get("names")
 
-                # UNCONDITIONAL FORCE: If single food but multiple nutrients, Y-axis MUST be nutrients
                 if "nutrient_name" in df.columns and "food_description" in df.columns:
                     if df["food_description"].nunique() == 1 and df["nutrient_name"].nunique() > 1:
                         name_col = "nutrient_name"
@@ -766,11 +739,9 @@ def visualizer_node(state: State):
                     name_col = string_cols[0] if len(string_cols) > 0 else df.columns[0]
 
                 val_col = config.get("values")
-                # Prevent fdc_id from being used as the value
                 if val_col == "fdc_id":
                     val_col = None
 
-                # Ensure we have a valid value column
                 if not val_col or val_col not in df.columns:
                     if "amount" in df.columns:
                         val_col = "amount"
@@ -778,50 +749,36 @@ def visualizer_node(state: State):
                         num_cols = [col for col in df.select_dtypes(include=['number']).columns if col != 'fdc_id']
                         val_col = num_cols[0] if len(num_cols) > 0 else df.columns[0]
                 
-                # Filter out non-macronutrients for pie charts (e.g., Energy)
                 temp_df = df.copy()
                 if name_col in temp_df.columns:
                     temp_df = temp_df[temp_df[name_col].astype(str).str.contains('Protein|Carbohydrate|lipid', case=False, na=False)]
                     
-                # Rule: Zero Value Filtering
                 temp_df = temp_df[temp_df[val_col].round(1) > 0]
                 if temp_df.empty: continue
 
-                # Rule 1: Highest to Lowest
                 df_sorted = temp_df.sort_values(by=val_col, ascending=False)
-                
-                # Format name column values (for pie slices and legends)
                 df_sorted[name_col] = df_sorted[name_col].apply(format_label)
                 
-                # Calculate percentage
                 total = df_sorted[val_col].sum()
                 df_sorted['pct_calc'] = (df_sorted[val_col] / total * 100).round(1) if total > 0 else 0
                 
-                # Row-by-row labels for pie
                 def get_pie_label(row):
                     u = str(row['unit_name']).lower().strip() if 'unit_name' in row and pd.notnull(row['unit_name']) else ""
                     unit_str = f" {u}" if u else ""
                     return f"{row[val_col]:.1f}{unit_str} ({row['pct_calc']}%)"
                 
-                # Apply label formatting to pie chart data
                 df_sorted['pie_label'] = df_sorted.apply(get_pie_label, axis=1)
                 
-                # Get number of slices and set colors
                 n = len(df_sorted)
                 blue_colors = ["#155289", "#95AAD3", "#B9DBF4"]
                 if n > 0:
-                    # Use provided colors, looping if more than 3 categories
                     color_seq = [blue_colors[i % len(blue_colors)] for i in range(n)]
                 else:
                     color_seq = blue_colors
                 
-                # Format display title using format_label helper
                 display_title = format_label(config.get("title", "Nutrient Composition"))
-                
-                # Create unit_lower for hover text
                 df_sorted['unit_lower'] = df_sorted['unit_name'].fillna("").astype(str).str.lower().str.strip() if 'unit_name' in df_sorted.columns else ""
                 
-                # --- Create the Pie Chart ---
                 fig = px.pie(
                     df_sorted, values=val_col, names=name_col,
                     title=display_title,
@@ -843,31 +800,23 @@ def visualizer_node(state: State):
                 final_types.append("pie")
                 final_figs.append(fig)
 
-            # --- Metric Display Creation ---
             elif v_type == "metric":
-                # Safely grab the amount, ignoring fdc_id
                 if "amount" in df.columns:
                     val = float(df["amount"].iloc[0])
                 else:
                     num_cols = [col for col in df.select_dtypes(include=['number']).columns if col != 'fdc_id']
                     val = float(df[num_cols[0]].iloc[0]) if len(num_cols) > 0 else float(df.iloc[0, 0])
                 
-                # Get the label for the metric (e.g., "Calories")
                 label = format_label(config.get("title") or df.columns[0])
-                
-                # Metric unit
                 u = str(df["unit_name"].iloc[0]).lower().strip() if "unit_name" in df.columns and pd.notnull(df["unit_name"].iloc[0]) else ""
                 unit_str = f" {u}" if u else ""
                 
-                # Add the metric to the final output arrays (these were previously missing!)
                 final_types.append("metric")
                 final_figs.append({"label": label, "value": f"{val:.1f}{unit_str}"})
 
-            # --- Table Creation ---
             elif v_type == "table":
                 df_clean = df.copy()
                 
-                # 1. Safely find the amount column
                 val_col = None
                 if "amount" in df_clean.columns:
                     val_col = "amount"
@@ -877,23 +826,16 @@ def visualizer_node(state: State):
                         val_col = num_cols[0]
                 
                 if val_col:
-                    # 2. Apply zero filter
                     df_clean = df_clean[df_clean[val_col].round(1) > 0]
                     
                     if not df_clean.empty:
-                        # --- 3. HIERARCHICAL TABLE SORTING (Must happen BEFORE column renaming) ---
                         if "nutrient_name" in df_clean.columns:
                             macro_order = ['Energy', 'Water', 'Total Carbohydrate', 'of which Sugars', 'of which Dietary Fiber', 'Protein', 'Total Fat', 'of which Saturated Fat', 'of which Trans Fat', 'of which Monounsaturated Fat', 'of which Polyunsaturated Fat']
                             
                             def get_table_sort_key(name):
-                                n = str(name).strip() # Strip accidental whitespace
+                                n = str(name).strip()
                                 n_lower = n.lower()
-                                
-                                # Priority 1: Macros
-                                if n in macro_order:
-                                    return (1, macro_order.index(n), n)
-                                    
-                                # Priority 2: Vitamins
+                                if n in macro_order: return (1, macro_order.index(n), n)
                                 if 'vitamin a' in n_lower or 'carotene' in n_lower or 'retinol' in n_lower: return (2, 1, n)
                                 if 'vitamin b1' in n_lower or 'thiamin' in n_lower: return (2, 2, n)
                                 if 'vitamin b2' in n_lower or 'riboflavin' in n_lower: return (2, 3, n)
@@ -908,14 +850,11 @@ def visualizer_node(state: State):
                                 if 'vitamin d' in n_lower: return (2, 12, n)
                                 if 'vitamin e' in n_lower or 'tocopherol' in n_lower: return (2, 13, n)
                                 if 'vitamin k' in n_lower or 'phylloquinone' in n_lower: return (2, 14, n)
-                                
-                                # Priority 3: Minerals (Alphabetical Tiebreaker)
                                 return (3, 99, n) 
                                 
                             df_clean['_sort_key'] = df_clean['nutrient_name'].apply(get_table_sort_key)
                             df_clean = df_clean.sort_values(by='_sort_key', ascending=True).drop(columns=['_sort_key'])
                                             
-                        # 4. Format numbers with EU commas
                         def get_table_val(row):
                             u = str(row['unit_name']).lower().strip() if 'unit_name' in row and pd.notnull(row['unit_name']) else ""
                             unit_str = f" {u}" if u else ""
@@ -925,10 +864,7 @@ def visualizer_node(state: State):
                         
                         df_clean[val_col] = df_clean.apply(get_table_val, axis=1)
 
-                # 5. Drop redundant columns
                 df_clean.drop(columns=[c for c in df_clean.columns if c.lower() in ["unit", "measure", "unit_name", "fdc_id"]], errors='ignore', inplace=True)
-                
-                # 6. Apply final aesthetic formatting (Sentence Case Headers)
                 df_clean.columns = [format_label(col) for col in df_clean.columns]
                 df_clean.index = range(1, len(df_clean) + 1)
                 
@@ -938,22 +874,19 @@ def visualizer_node(state: State):
         # ====================================================
         # AI SUMMARY GENERATOR 
         # ====================================================
-        ai_summary = "Here is the result." # Default fallback
+        ai_summary = "Here is the result." 
         
         try:
             if not df.empty:
-                # Convert a small slice of the data to a simple text format
                 summary_context = df.head(10).to_string(index=False)
                 user_query = state.get('query', 'a nutrition question')
                 
-                # Fetch the prompt from our clean, isolated file
                 summary_prompt = get_summary_prompt(
                     user_query=user_query, 
                     data_context=summary_context, 
                     user_profile=state.get("user_profile", {})
                 )
                 
-                # Call the LLM
                 summary_response = llm.invoke([HumanMessage(content=summary_prompt)])
                 ai_summary = summary_response.content.strip()
                 
@@ -961,18 +894,33 @@ def visualizer_node(state: State):
             print(f"Summary generation failed (falling back to default): {summary_err}")
             pass 
 
-        # Return the results
+        # --- 🔴 CHANGED: WRAP STANDARD TABLES IN A DICTIONARY TO BYPASS FASTAPI FILTERING ---
+        serialized_figs = []
+        for f in final_figs:
+            if hasattr(f, "to_json"):  # Plotly Figure
+                serialized_figs.append(json.loads(f.to_json()))
+            elif isinstance(f, pd.DataFrame):  # Table DataFrame
+                # 🔴 THE FIX: Wrap the list in a dictionary!
+                serialized_figs.append({"table_data": f.fillna("").to_dict(orient="records")})
+            else:  # Metric dict or other
+                serialized_figs.append(f)                
+
         return {
             "visual_type": final_types, 
-            "fig": final_figs, 
-            "data": df, 
+            "fig": serialized_figs, 
+            "data": df.fillna("").to_dict(orient="records"), 
             "summary": ai_summary
         }
-
-    # Return error JSON instead of crashing
+    
     except Exception as e:
         print(f"Visualizer logic error: {e}")
-        return {"visual_type": ["table"], "fig": [df], "data": df, "summary": "There was an error generating your visualizations."}
+        # 🔴 THE FIX: Ensure the fallback error table is ALSO wrapped in a dictionary!
+        return {
+            "visual_type": ["table"], 
+            "fig": [{"table_data": df.fillna("").to_dict(orient="records")}], 
+            "data": df.fillna("").to_dict(orient="records"), 
+            "summary": "There was an error generating your visualizations."
+        }
 
 # ====================================================
 #  10. BUILD LANGGRAPH (FINAL ASSEMBLY)
@@ -987,5 +935,8 @@ workflow.add_edge("librarian", "data_retrieval")
 workflow.add_edge("data_retrieval", "visualizer")
 workflow.add_edge("visualizer", END)
 
+# Initialize the memory saver
+memory = MemorySaver()
+
 # Compile and export the app
-agents_flow = workflow.compile()
+agents_flow = workflow.compile(checkpointer=memory)
