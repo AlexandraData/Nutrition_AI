@@ -122,4 +122,4 @@ npm run dev
 
 Backend: Deployed to Google Cloud Run using the provided Dockerfile. Ensure the service account has the Vertex AI User, BigQuery User, and BigQuery Data Viewer IAM roles.
 
-Frontend: Deployed to Vercel with the Root Directory configured to /frontend.
+Frontend: Deployed to Firebase with the Root Directory configured to /frontend.
