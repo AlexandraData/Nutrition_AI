@@ -23,9 +23,6 @@ This project is structured as a Monorepo containing both the client and server c
 
 Here is the flow of our multi-agent application:
 
-<details>
-<summary><b>Click to view Architecture Diagram</b></summary>
-
 ```mermaid
 %%{init: {'themeVariables': { ... }}}%%
 graph TD
