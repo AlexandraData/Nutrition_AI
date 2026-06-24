@@ -17,7 +17,7 @@ This project is structured as a Monorepo containing both the client and server c
 * **AI & Logic:** Google Vertex AI (Gemini 2.5 Pro), LangChain, LangGraph (with Checkpointer memory)
 * **Database:** Google BigQuery (`db_nutrition` for USDA data, and `chat_logs` for async analytics)
 * **Hosting:** Google Cloud Run (Dockerized)
----
+--
 
 ### Architecture Diagram
 
