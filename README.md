@@ -7,17 +7,16 @@ A full-stack, AI-powered web application that allows users to ask complex nutrit
 
 This project is structured as a Monorepo containing both the client and server codebases.
 
-### Frontend (`/frontend`)
+**Frontend ( `/frontend` )**
 * **Framework:** React + Vite
-* **Styling:** CSS / Tailwind (if applicable)
-* **Hosting:** Vercel
+* **Styling:** CSS / Tailwind
+* **Hosting:** Firebase Hosting
 
-### Backend (`/backend`)
+**Backend ( `/backend` )**
 * **Framework:** Python + FastAPI
-* **AI & Logic:** Google Vertex AI (Gemini 2.5 Pro), LangChain, LangGraph
-* **Database:** Google BigQuery (`db_nutrition`)
+* **AI & Logic:** Google Vertex AI (Gemini 2.5 Pro), LangChain, LangGraph (with Checkpointer memory)
+* **Database:** Google BigQuery (`db_nutrition` for USDA data, and `chat_logs` for async analytics)
 * **Hosting:** Google Cloud Run (Dockerized)
-
 ---
 
 ## 📂 Folder Structure
