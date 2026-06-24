@@ -19,6 +19,62 @@ This project is structured as a Monorepo containing both the client and server c
 * **Hosting:** Google Cloud Run (Dockerized)
 ---
 
+### Architecture Diagram
+
+Here is the flow of our multi-agent application:
+
+```mermaid
+%%{init: {'themeVariables': { 'edgeLabelBackground':'#ffffff', 'clusterBkg':'#ffffff', 'clusterBorder':'#333333'}}}%%
+graph TD
+    classDef frontend fill:#61dafb,stroke:#333,stroke-width:2px,color:#242424,font-weight:bold;
+    classDef backend fill:#4caf50,stroke:#333,stroke-width:2px,color:#ffffff,font-weight:bold;
+    classDef agent fill:#ff9800,stroke:#333,stroke-width:2px,color:#ffffff,font-weight:bold;
+    classDef db fill:#f4b400,stroke:#333,stroke-width:2px,color:#242424,font-weight:bold;
+    classDef memory fill:#9c27b0,stroke:#333,stroke-width:2px,color:#ffffff,font-weight:bold;
+    classDef asyncTask fill:#ff5252,stroke:#333,stroke-width:2px,stroke-dasharray: 5 5,color:#ffffff,font-weight:bold;
+
+    User((User))
+    React[React Frontend]:::frontend
+    LocalStorage[(Browser Local Storage)]:::db
+    CloudRun{FastAPI on Google Cloud Run}:::backend
+    BgTask[FastAPI Background Task<br/>Async Logging]:::asyncTask
+
+    subgraph Orchestration ["&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;LangGraph AI Orchestration"]
+        direction TB
+        Memory[(Memory Checkpointer<br/>Thread ID)]:::memory
+        Librarian[Librarian Agent<br/>Text-to-SQL]:::agent
+        DataRetrieval[Data Retrieval Node<br/>Executes SQL & Math]:::agent
+        Visualizer[Visualizer Agent<br/>Builds Charts & Tables]:::agent
+        Summarizer[Summarizer Agent<br/>Nutritionist]:::agent
+        
+        Memory --> Librarian
+        Librarian -->|Passes Generated SQL| DataRetrieval
+        DataRetrieval -->|Passes Cleaned Data| Visualizer
+        Visualizer -->|Passes UI Configs| Summarizer
+    end
+
+    subgraph BigQuery ["Google BigQuery"]
+        ChatLogs[(chat_logs Table<br/>Append-Only)]:::db
+        USDA[(USDA Food Database<br/>Read-Only)]:::db
+    end
+
+    User -->|Asks Question| React
+    React <-->|Saves & Loads Chat History| LocalStorage
+    React -->|REST API Call| CloudRun
+    
+    CloudRun -->|Initializes State & Profile| Memory
+    
+    DataRetrieval -->|Executes SQL| USDA
+    USDA -->|Returns Raw Data| DataRetrieval
+    
+    Summarizer -->|Final State <br/> Summary + JSON Widgets| CloudRun
+    CloudRun -->|Returns Complete JSON| React
+    React -->|Displays Chat & Widgets| User
+
+    CloudRun -.->|Trigger Async Task| BgTask
+    BgTask -.->|Silently Insert Row| ChatLogs
+```
+
 ## 📂 Folder Structure
 
 ```text
