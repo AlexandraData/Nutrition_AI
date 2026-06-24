@@ -289,7 +289,7 @@ def data_retrieval_node(state: State):
         
         # --- CATCH EMPTY RESULTS EARLY ---
         if df.empty:
-            return {"error": "No data found for this query. Try adjusting your spelling or simpler terms.", "data": None}
+            return {"error": "No data found for this query. Try adjusting your spelling or simpler terms or look up the food in the Food List.", "data": None}
         
         # --- TRAFFIC LIGHT: AUTOMATIC ROUTING ---
         if state.get("is_daily_log", False) or "meal_name" in df.columns:
@@ -515,7 +515,7 @@ def visualizer_node(state: State):
         df = pd.DataFrame()
     
     if error or df.empty:
-        err_msg = error or "No data found for this query. Try adjusting your spelling or using simpler terms (e.g., 'carrots' instead of 'carrot, raw')."
+        err_msg = error or "No data found for this query. Try adjusting your spelling or using simpler terms or look up the food in the Food List."
         return {"visual_type": ["none"], "fig": [None], "error": err_msg}
 
     # --- SMART FILTERING LOGIC (v2: FDC ID precise filtering) ---
@@ -595,212 +595,222 @@ def visualizer_node(state: State):
 
         # --- CHART GENERATION LOOP ---
         for v_type in v_types:
-            if v_type in ["bar", "macro_bar", "micro_bar"]:
-                name_col = config.get("y_col")
+            try:
+                if v_type in ["bar", "macro_bar", "micro_bar"]:
+                    name_col = config.get("y_col")
 
-                if "nutrient_name" in df.columns and "food_description" in df.columns:
-                    if df["food_description"].nunique() == 1 and df["nutrient_name"].nunique() > 1:
-                        name_col = "nutrient_name"
+                    if "nutrient_name" in df.columns and "food_description" in df.columns:
+                        if df["food_description"].nunique() == 1 and df["nutrient_name"].nunique() > 1:
+                            name_col = "nutrient_name"
+                        elif not name_col or name_col not in df.columns:
+                            name_col = "food_description"
                     elif not name_col or name_col not in df.columns:
-                        name_col = "food_description"
-                elif not name_col or name_col not in df.columns:
-                    string_cols = df.select_dtypes(include=['object', 'string']).columns
-                    name_col = string_cols[0] if len(string_cols) > 0 else df.columns[0]
+                        string_cols = df.select_dtypes(include=['object', 'string']).columns
+                        name_col = string_cols[0] if len(string_cols) > 0 else df.columns[0]
 
-                val_col = config.get("x_col")
-                if val_col == "fdc_id":
-                    val_col = None
-                    
-                if not val_col or val_col not in df.columns:
-                    if "amount" in df.columns:
-                        val_col = "amount"
+                    val_col = config.get("x_col")
+                    if val_col == "fdc_id":
+                        val_col = None
+                        
+                    if not val_col or val_col not in df.columns:
+                        if "amount" in df.columns:
+                            val_col = "amount"
+                        else:
+                            num_cols = [col for col in df.select_dtypes(include=['number']).columns if col != 'fdc_id']
+                            val_col = num_cols[0] if len(num_cols) > 0 else df.columns[0]
+
+                    temp_df = df.copy()
+                    macro_order = ['Energy', 'Water', 'Total Carbohydrate', 'of which Sugars', 'of which Dietary Fiber', 'Protein', 'Total Fat', 'of which Saturated Fat', 'of which Trans Fat', 'of which Monounsaturated Fat', 'of which Polyunsaturated Fat']
+
+                    if v_type == "macro_bar":
+                        color = "#155289"
+                        title = config.get("title_macro", "Macronutrients")
+                        temp_df = temp_df[temp_df[name_col].isin(macro_order)]
+                        
+                        temp_df = temp_df[temp_df[val_col].round(1) > 0]
+                        if temp_df.empty: continue
+                        
+                        temp_df['sort_idx'] = temp_df[name_col].apply(lambda x: macro_order.index(x) if x in macro_order else 99)
+                        df_sorted = temp_df.sort_values('sort_idx', ascending=False)
+
+                    elif v_type == "micro_bar":
+                        color = "#95AAD3"
+                        title = config.get("title_micro", "Vitamins and Minerals")
+                        temp_df = temp_df[~temp_df[name_col].isin(macro_order)]
+                        
+                        temp_df = temp_df[temp_df[val_col].round(1) > 0]
+                        if temp_df.empty: continue
+                        
+                        def get_micro_sort(name):
+                            n = str(name).lower()
+                            if 'vitamin a' in n or 'carotene' in n or 'retinol' in n: return 1
+                            if 'vitamin b1' in n or 'thiamin' in n: return 2
+                            if 'vitamin b2' in n or 'riboflavin' in n: return 3
+                            if 'vitamin b3' in n or 'niacin' in n: return 4
+                            if 'vitamin b5' in n or 'pantothenic' in n: return 5
+                            if 'vitamin b6' in n: return 6
+                            if 'vitamin b7' in n or 'biotin' in n: return 7
+                            if 'vitamin b9' in n or 'folate' in n: return 8
+                            if 'vitamin b12' in n: return 9
+                            if 'vitamin b' in n or 'b-complex' in n: return 10
+                            if 'vitamin c' in n or 'ascorbic' in n: return 11
+                            if 'vitamin d' in n: return 12
+                            if 'vitamin e' in n or 'tocopherol' in n: return 13
+                            if 'vitamin k' in n or 'phylloquinone' in n: return 14
+                            return 20
+                        
+                        temp_df['sort_idx'] = temp_df[name_col].apply(get_micro_sort)
+                        df_sorted = temp_df.sort_values(['sort_idx', name_col], ascending=[False, False])
+
                     else:
-                        num_cols = [col for col in df.select_dtypes(include=['number']).columns if col != 'fdc_id']
-                        val_col = num_cols[0] if len(num_cols) > 0 else df.columns[0]
+                        color = "#95AAD3" 
+                        title = config.get("title", "Nutrient Data")
+                        temp_df = temp_df[temp_df[val_col].round(1) > 0]
+                        if temp_df.empty: continue
+                        df_sorted = temp_df.sort_values(by=val_col, ascending=True)
 
-                temp_df = df.copy()
-                macro_order = ['Energy', 'Water', 'Total Carbohydrate', 'of which Sugars', 'of which Dietary Fiber', 'Protein', 'Total Fat', 'of which Saturated Fat', 'of which Trans Fat', 'of which Monounsaturated Fat', 'of which Polyunsaturated Fat']
-
-                if v_type == "macro_bar":
-                    color = "#155289"
-                    title = config.get("title_macro", "Macronutrients")
-                    temp_df = temp_df[temp_df[name_col].isin(macro_order)]
+                    df_sorted[name_col] = df_sorted[name_col].apply(lambda x: x if x in protected_labels else format_label(x))
                     
-                    temp_df = temp_df[temp_df[val_col].round(1) > 0]
-                    if temp_df.empty: continue
+                    total = df_sorted[val_col].sum()
+                    df_sorted['pct'] = (df_sorted[val_col] / total * 100).round(1) if total > 0 else 0
                     
-                    temp_df['sort_idx'] = temp_df[name_col].apply(lambda x: macro_order.index(x) if x in macro_order else 99)
-                    df_sorted = temp_df.sort_values('sort_idx', ascending=False)
-
-                elif v_type == "micro_bar":
-                    color = "#95AAD3"
-                    title = config.get("title_micro", "Vitamins and Minerals")
-                    temp_df = temp_df[~temp_df[name_col].isin(macro_order)]
+                    def get_bar_label(row):
+                        u = str(row['unit_name']).lower().strip() if 'unit_name' in row and pd.notnull(row['unit_name']) else ""
+                        unit_str = f" {u}" if u else ""
+                        us_format = f"{row[val_col]:,.2f}" 
+                        eu_format = us_format.replace(',', 'X').replace('.', ',').replace('X', '.')
+                        if str(row[name_col]).lower() == 'energy':
+                            return f"{eu_format}{unit_str}"
+                        else:
+                            return f"{eu_format}{unit_str} ({row['pct']}%)"
                     
-                    temp_df = temp_df[temp_df[val_col].round(1) > 0]
-                    if temp_df.empty: continue
+                    df_sorted['display_text'] = df_sorted.apply(get_bar_label, axis=1)
+                    calc_height = max(400, len(df_sorted) * 25)
                     
-                    def get_micro_sort(name):
-                        n = str(name).lower()
-                        if 'vitamin a' in n or 'carotene' in n or 'retinol' in n: return 1
-                        if 'vitamin b1' in n or 'thiamin' in n: return 2
-                        if 'vitamin b2' in n or 'riboflavin' in n: return 3
-                        if 'vitamin b3' in n or 'niacin' in n: return 4
-                        if 'vitamin b5' in n or 'pantothenic' in n: return 5
-                        if 'vitamin b6' in n: return 6
-                        if 'vitamin b7' in n or 'biotin' in n: return 7
-                        if 'vitamin b9' in n or 'folate' in n: return 8
-                        if 'vitamin b12' in n: return 9
-                        if 'vitamin b' in n or 'b-complex' in n: return 10
-                        if 'vitamin c' in n or 'ascorbic' in n: return 11
-                        if 'vitamin d' in n: return 12
-                        if 'vitamin e' in n or 'tocopherol' in n: return 13
-                        if 'vitamin k' in n or 'phylloquinone' in n: return 14
-                        return 20
+                    x_label = format_label(val_col)
+                    y_label = format_label(name_col)
+                    display_title = format_label(title)
                     
-                    temp_df['sort_idx'] = temp_df[name_col].apply(get_micro_sort)
-                    df_sorted = temp_df.sort_values(['sort_idx', name_col], ascending=[False, False])
+                    if display_title.lower() == "vitamins and minerals":
+                        display_title = "Vitamins and Minerals"
+                    elif display_title.lower() == "macronutrients":
+                        display_title = "Macronutrients"
 
-                else:
-                    color = "#95AAD3" 
-                    title = config.get("title", "Nutrient Data")
-                    temp_df = temp_df[temp_df[val_col].round(1) > 0]
-                    if temp_df.empty: continue
-                    df_sorted = temp_df.sort_values(by=val_col, ascending=True)
+                    fig = go.Figure(go.Bar(
+                        x=df_sorted[val_col].tolist(),
+                        y=df_sorted[name_col].tolist(),
+                        orientation='h',
+                        text=df_sorted['display_text'].tolist(),
+                        textposition='outside',
+                        marker_color=color,
+                        name=''
+                    ))
+                    
+                    max_val = df_sorted[val_col].max()
+                    buffer_val = max_val * 1.30
 
-                df_sorted[name_col] = df_sorted[name_col].apply(lambda x: x if x in protected_labels else format_label(x))
-                
-                total = df_sorted[val_col].sum()
-                df_sorted['pct'] = (df_sorted[val_col] / total * 100).round(1) if total > 0 else 0
-                
-                def get_bar_label(row):
-                    u = str(row['unit_name']).lower().strip() if 'unit_name' in row and pd.notnull(row['unit_name']) else ""
-                    unit_str = f" {u}" if u else ""
-                    us_format = f"{row[val_col]:,.2f}" 
-                    eu_format = us_format.replace(',', 'X').replace('.', ',').replace('X', '.')
-                    if str(row[name_col]).lower() == 'energy':
-                        return f"{eu_format}{unit_str}"
-                    else:
-                        return f"{eu_format}{unit_str} ({row['pct']}%)"
-                
-                df_sorted['display_text'] = df_sorted.apply(get_bar_label, axis=1)
-                calc_height = max(400, len(df_sorted) * 25)
-                
-                x_label = format_label(val_col)
-                y_label = format_label(name_col)
-                display_title = format_label(title)
-                
-                if display_title.lower() == "vitamins and minerals":
-                    display_title = "Vitamins and Minerals"
-                elif display_title.lower() == "macronutrients":
-                    display_title = "Macronutrients"
+                    fig.update_layout(
+                        title=display_title,
+                        xaxis=dict(range=[0, buffer_val], title=x_label),
+                        yaxis_title=y_label,
+                        height=calc_height,
+                        plot_bgcolor="white", paper_bgcolor="white",
+                        font=dict(color="#242424"),
+                        margin=dict(l=200, r=150, t=40, b=5), 
+                        title_font_color="#242424",
+                        bargap=0.1, bargroupgap=0.1,
+                        showlegend=False
+                    )
+                    fig.update_xaxes(title_font=dict(size=12, color="#242424"), tickfont_color="#242424", automargin=True)
+                    fig.update_yaxes(title_font=dict(size=12, color="#242424"), tickfont_color="#242424", automargin=True)
 
-                fig = go.Figure(go.Bar(
-                    x=df_sorted[val_col].tolist(),
-                    y=df_sorted[name_col].tolist(),
-                    orientation='h',
-                    text=df_sorted['display_text'].tolist(),
-                    textposition='outside',
-                    marker_color=color,
-                    name=''
-                ))
-                
-                max_val = df_sorted[val_col].max()
-                buffer_val = max_val * 1.30
+                    final_types.append("bar")
+                    final_figs.append(fig)
 
-                fig.update_layout(
-                    title=display_title,
-                    xaxis=dict(range=[0, buffer_val], title=x_label),
-                    yaxis_title=y_label,
-                    height=calc_height,
-                    plot_bgcolor="white", paper_bgcolor="white",
-                    font=dict(color="#242424"),
-                    margin=dict(l=200, r=150, t=40, b=5), 
-                    title_font_color="#242424",
-                    bargap=0.1, bargroupgap=0.1,
-                    showlegend=False
-                )
-                fig.update_xaxes(title_font=dict(size=12, color="#242424"), tickfont_color="#242424", automargin=True)
-                fig.update_yaxes(title_font=dict(size=12, color="#242424"), tickfont_color="#242424", automargin=True)
+                elif v_type == "pie":
+                    name_col = config.get("names")
 
-                final_types.append("bar")
-                final_figs.append(fig)
-
-            elif v_type == "pie":
-                name_col = config.get("names")
-
-                if "nutrient_name" in df.columns and "food_description" in df.columns:
-                    if df["food_description"].nunique() == 1 and df["nutrient_name"].nunique() > 1:
-                        name_col = "nutrient_name"
+                    if "nutrient_name" in df.columns and "food_description" in df.columns:
+                        if df["food_description"].nunique() == 1 and df["nutrient_name"].nunique() > 1:
+                            name_col = "nutrient_name"
+                        elif not name_col or name_col not in df.columns:
+                            name_col = "food_description"
                     elif not name_col or name_col not in df.columns:
-                        name_col = "food_description"
-                elif not name_col or name_col not in df.columns:
-                    string_cols = df.select_dtypes(include=['object', 'string']).columns
-                    name_col = string_cols[0] if len(string_cols) > 0 else df.columns[0]
+                        string_cols = df.select_dtypes(include=['object', 'string']).columns
+                        name_col = string_cols[0] if len(string_cols) > 0 else df.columns[0]
 
-                val_col = config.get("values")
-                if val_col == "fdc_id":
-                    val_col = None
+                    val_col = config.get("values")
+                    if val_col == "fdc_id":
+                        val_col = None
 
-                if not val_col or val_col not in df.columns:
-                    if "amount" in df.columns:
-                        val_col = "amount"
-                    else:
-                        num_cols = [col for col in df.select_dtypes(include=['number']).columns if col != 'fdc_id']
-                        val_col = num_cols[0] if len(num_cols) > 0 else df.columns[0]
-                
-                temp_df = df.copy()
-                if name_col in temp_df.columns:
-                    temp_df = temp_df[temp_df[name_col].astype(str).str.contains('Protein|Carbohydrate|lipid', case=False, na=False)]
+                    if not val_col or val_col not in df.columns:
+                        if "amount" in df.columns:
+                            val_col = "amount"
+                        else:
+                            num_cols = [col for col in df.select_dtypes(include=['number']).columns if col != 'fdc_id']
+                            val_col = num_cols[0] if len(num_cols) > 0 else df.columns[0]
                     
-                temp_df = temp_df[temp_df[val_col].round(1) > 0]
-                if temp_df.empty: continue
+                    temp_df = df.copy()
+                    if name_col in temp_df.columns:
+                        temp_df = temp_df[temp_df[name_col].astype(str).str.contains('Protein|Carbohydrate|lipid', case=False, na=False)]
+                        
+                    temp_df = temp_df[temp_df[val_col].round(1) > 0]
+                    if temp_df.empty: continue
 
-                df_sorted = temp_df.sort_values(by=val_col, ascending=False)
-                df_sorted[name_col] = df_sorted[name_col].apply(format_label)
-                
-                total = df_sorted[val_col].sum()
-                df_sorted['pct_calc'] = (df_sorted[val_col] / total * 100).round(1) if total > 0 else 0
-                
-                def get_pie_label(row):
-                    u = str(row['unit_name']).lower().strip() if 'unit_name' in row and pd.notnull(row['unit_name']) else ""
-                    unit_str = f" {u}" if u else ""
-                    return f"{row[val_col]:.1f}{unit_str} ({row['pct_calc']}%)"
-                
-                df_sorted['pie_label'] = df_sorted.apply(get_pie_label, axis=1)
-                
-                n = len(df_sorted)
-                blue_colors = ["#155289", "#95AAD3", "#B9DBF4"]
-                if n > 0:
-                    color_seq = [blue_colors[i % len(blue_colors)] for i in range(n)]
-                else:
-                    color_seq = blue_colors
-                
-                display_title = format_label(config.get("title", "Nutrient Composition"))
-                df_sorted['unit_lower'] = df_sorted['unit_name'].fillna("").astype(str).str.lower().str.strip() if 'unit_name' in df_sorted.columns else ""
-                
-                fig = px.pie(
-                    df_sorted, values=val_col, names=name_col,
-                    title=display_title,
-                    color_discrete_sequence=color_seq,
-                    custom_data=['unit_lower']
-                )
-                fig.update_traces(
-                    textposition='outside',
-                    text=df_sorted['pie_label'],
-                    textinfo='text',
-                    hovertemplate="%{label}<br>%{value:.2f} %{customdata[0]}<extra></extra>"
-                )
-                fig.update_layout(
-                    plot_bgcolor="white", paper_bgcolor="white",
-                    font=dict(color="#242424"),
-                    title_font_color="#242424",
-                    legend=dict(font=dict(color="#242424"))
-                )
-                final_types.append("pie")
-                final_figs.append(fig)
+                    df_sorted = temp_df.sort_values(by=val_col, ascending=False)
+                    df_sorted[name_col] = df_sorted[name_col].apply(format_label)
+                    
+                    total = df_sorted[val_col].sum()
+                    df_sorted['pct_calc'] = (df_sorted[val_col] / total * 100).round(1) if total > 0 else 0
+                    
+                    def get_pie_label(row):
+                        u = str(row['unit_name']).lower().strip() if 'unit_name' in row and pd.notnull(row['unit_name']) else ""
+                        unit_str = f" {u}" if u else ""
+                        return f"{row[val_col]:.1f}{unit_str} ({row['pct_calc']}%)"
+                    
+                    df_sorted['pie_label'] = df_sorted.apply(get_pie_label, axis=1)
+                    
+                    n = len(df_sorted)
+                    blue_colors = ["#155289", "#95AAD3", "#B9DBF4"]
+                    if n > 0:
+                        color_seq = [blue_colors[i % len(blue_colors)] for i in range(n)]
+                    else:
+                        color_seq = blue_colors
+                    
+                    display_title = format_label(config.get("title", "Nutrient Composition"))
+                    df_sorted['unit_lower'] = df_sorted['unit_name'].fillna("").astype(str).str.lower().str.strip() if 'unit_name' in df_sorted.columns else ""
+                    
+                    fig = px.pie(
+                        df_sorted, values=val_col, names=name_col,
+                        title=display_title,
+                        color_discrete_sequence=color_seq,
+                        custom_data=['unit_lower']
+                    )
+                    fig.update_traces(
+                        textposition='outside',
+                        text=df_sorted['pie_label'],
+                        textinfo='text',
+                        hovertemplate="%{label}<br>%{value:.2f} %{customdata[0]}<extra></extra>"
+                    )
+                    fig.update_layout(
+                        plot_bgcolor="white", paper_bgcolor="white",
+                        font=dict(color="#242424"),
+                        title_font_color="#242424",
+                        legend=dict(font=dict(color="#242424"))
+                    )
+                    final_types.append("pie")
+                    final_figs.append(fig)
 
-            elif v_type == "metric":
+            # ADD THE NEW EXCEPT BLOCK HERE
+            except Exception as chart_err:
+                print(f"Failed to generate {v_type} chart: {chart_err}")
+                print("Falling back to table format.")
+                # Force it to draw a table instead!
+                v_type = "table"
+
+            # METRICS AND TABLES STAY OUTSIDE THE NEW TRY/EXCEPT
+            # (Notice how this handles 'metric', 'table', AND the fallback from the except block)
+            if v_type == "metric":
                 if "amount" in df.columns:
                     val = float(df["amount"].iloc[0])
                 else:

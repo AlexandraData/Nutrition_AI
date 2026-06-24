@@ -1,8 +1,9 @@
 # ============================================
 # 1. IMPORTS
 # ============================================
-from fastapi import FastAPI, Request, Query
+from fastapi import FastAPI, Request, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from datetime import datetime, timezone
 from agents import agents_flow, bq_client
 
 # ============================================
@@ -26,10 +27,35 @@ app.add_middleware(
 )
 
 # ============================================
+# BACKGROUND LOGGING HELPER FUNCTION
+# ============================================
+def save_log_to_bigquery(user_query: str, ai_answer: str, has_error: bool):
+    """Saves the chat log to BigQuery silently in the background."""
+    try:
+        table_id = "health-lifestyle-493817.db_nutrition.chat_logs"
+        
+        row_to_insert = [
+            {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "user_question": str(user_query),
+                "ai_answer": str(ai_answer),
+                "has_error": bool(has_error)
+            }
+        ]
+        
+        # insert_rows_json safely handles escaping quotes and prevents SQL injection
+        errors = bq_client.insert_rows_json(table_id, row_to_insert)
+        if errors:
+            print(f"Error saving log to BigQuery: {errors}")
+            
+    except Exception as e:
+        print(f"Background task crashed: {e}")
+
+# ============================================
 # 4. FASTAPI ROUTES (API ENDPOINTS)
 # ============================================
 @app.post("/ask/")
-async def ask(request: Request):
+async def ask(request: Request, background_tasks: BackgroundTasks):
     body = await request.json()
     user_query = body.get("user_query")
 
@@ -63,18 +89,28 @@ async def ask(request: Request):
         result["totals"] = None
         result["fig"] = None
 
-    # --- 🔴 THE FIX: PASS DATA DIRECTLY ---
-    # agents.py already serialized all data into safe lists and dicts. 
-    # We pass it straight to the frontend without running redundant instance checks.
     response_data = {
         "sql_query": result.get("sql_query"),
         "error": result.get("error"),
         "visual_type": result.get("visual_type"),
         "summary": result.get("summary", "Here is the result."),
-        "data": result.get("data"),     # <--- Safely passed through
-        "totals": result.get("totals"), # <--- Safely passed through
-        "fig": result.get("fig")        # <--- Safely passed through
+        "data": result.get("data"),     
+        "totals": result.get("totals"), 
+        "fig": result.get("fig")        
     }
+    
+    # ============================================
+    # TRIGGER THE ZERO-DELAY BACKGROUND TASK
+    # ============================================
+    is_error = True if response_data.get("error") else False
+    summary_text = response_data.get("error") if is_error else response_data.get("summary")
+    
+    background_tasks.add_task(
+        save_log_to_bigquery, 
+        user_query=user_query, 
+        ai_answer=summary_text, 
+        has_error=is_error
+    )
     
     return response_data
 
@@ -108,5 +144,4 @@ if __name__ == "__main__":
     
     port = int(os.environ.get("PORT", 8000))
     
-    # 🔴 THE FIX: Google Cloud Run requires "0.0.0.0", not the literal string "[IP_ADDRESS]"
     uvicorn.run(app, host="0.0.0.0", port=port)

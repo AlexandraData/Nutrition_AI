@@ -10,6 +10,9 @@ import {
   Search, Pill, Droplet, Apple, Beef, Fish, MessageCircle
 } from 'lucide-react';
 import './App.css';
+import jsPDF from "jspdf";
+import "jspdf-autotable";
+import html2canvas from "html2canvas";
 
 // const API_URL = 'http://localhost:8000/ask/';  For local development
 const BASE_URL = 'https://nutrition-backend-355269382421.us-central1.run.app';    // For deployed cloud run
@@ -116,26 +119,36 @@ function App() {
   }, []);
 
   const helperQueries = {
-    "Food Type": [
-      "Show me 10 examples of Foundation Food",
-      "Show me 10 examples of Branded Food",
-      "Show me 10 examples of Survey Food"
+    "Foods": [
+      "What are the nutrients of a raw apple?",
+      "What are the Top 10 fruits with high sugar?",
+      "What are the top 10 foods in Omega-3?",
+      "What are the Top 15 foods in trans fats?",
+      "What are the nutrients of a salmon, coho, wild, cooked?",
+      "What are the nutrients of chicken breast?",
+      "What are the Top 10 high-protein raw foods?",
+      "What are the Top 10 high-protein nuts and seeds?",
+      "What are the macronutrients of a banana?",
+      "How much protein is in an egg?",
+      "What is the vitamin K content of spinach?",
+      "What are the Top 20 foods in iron, not fortified, not cereal?",
+      "Show me the Top 10 foods in cholesterol",
+      "What is the cholesterol content of Cookies, brownies, commercially prepared?",
+      'What are the nutrients of Beef, loin, tenderloin roast, separable lean only, boneless, trimmed to 0" fat, select, cooked, roasted?'
     ],
     "Food Size": [
-      "What is the standard portion size for an apple?",
-      "Nutrients in 100g of chicken breast",
-      "Show me calories in 1 cup of cooked rice"
+      "What are the calories in 2 sweet potatoes?",
+      "Nutrients in 150g of turkey",
+      "What are the sugars in 5 strawberries?",
+      "Show me the macronutrients of 3 slices of bread"
     ],
     "Diet Type": [
       "Top foods suitable for a Standard diet",
       "Top foods suitable for a Vegetarian diet",
       "Top foods suitable for a Vegan diet"
     ],
-    "Foods": [
-      "🔍 Search Food Database...",
-      "What are the macronutrients of an apple?",
-      "Show me the nutrient profile of a banana",
-      "How much protein is in an egg?"
+    "Food List": [
+      "🔍 Search Food List..."
     ],
     "Vitamins": [
       "Top 10 foods in Vitamin A",
@@ -169,10 +182,10 @@ function App() {
   // --- ICON MAPPING FUNCTION FOR CATEGORIES ---
   const getCategoryIcon = (category) => {
     switch (category) {
-      case "Food Type": return <Apple size={14} />;
+      case "Foods": return <Apple size={14} />;
       case "Food Size": return <Scale size={14} />;
       case "Diet Type": return <Leaf size={14} />;
-      case "Foods": return <Search size={14} />;
+      case "Food List": return <Search size={14} />;
       case "Vitamins": return <Pill size={14} />;
       case "Minerals": return <Droplet size={14} />;
       default: return null;
@@ -214,12 +227,7 @@ function App() {
   const [showInfo, setShowInfo] = useState(false);
   const [showIngredientTips, setShowIngredientTips] = useState(false);
 
-  // FOOD TYPE, DIET TYPE, AND SIZE FILTER STATES
-  const FOOD_TYPES = [
-    { label: "Foundation Food", value: "Foundation Food" },
-    { label: "Branded Food", value: "Branded Food" },
-    { label: "Survey Food", value: "Survey Food" }
-  ];
+  // DIET TYPE, AND SIZE FILTER STATES
 
   const DIET_TYPES = [
     { label: "Standard", value: "Standard" },
@@ -431,7 +439,6 @@ function App() {
         {/* Logo & Subtitle */}
         <div className="sidebar-brand">
           <h2>🥗 Nutrition AI</h2>
-          <p>Ask about calories, fats and more.</p>
         </div>
 
         {/* Tracker Section */}
@@ -494,7 +501,7 @@ function App() {
               <button className="suggestion-card" onClick={() => setQuery("What are the nutrients of a raw apple?")}>
                 <div className="card-icon">🍎</div>
                 <div className="card-text">
-                  <strong>Nutrients of a raw apple</strong>
+                  <strong>Nutrients of an apple</strong>
                   <span>Calories, carbs, fiber & more</span>
                 </div>
               </button>
@@ -518,8 +525,8 @@ function App() {
               <button className="suggestion-card" onClick={() => setActiveModal('daily_food')}>
                 <div className="card-icon">📝</div>
                 <div className="card-text">
-                  <strong>Log my breakfast</strong>
-                  <span>"2 eggs, toast, black coffee"</span>
+                  <strong>Log my food intake</strong>
+                  <span>Breakfast: 2 eggs</span>
                 </div>
               </button>
             </div>
@@ -700,8 +707,8 @@ function App() {
                         type="button"
                         className="flyout-item"
                         onClick={() => {
-                          if (q === "🔍 Search Food Database...") {
-                            setActiveModal('foods');
+                          if (q === "🔍 Search Food List...") {
+                            setActiveModal('food_list');
                           } else {
                             setQuery(q);
                           }
@@ -731,10 +738,10 @@ function App() {
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', paddingBottom: '12px', borderBottom: '1px solid #e2e8f0' }}>
               <h2 style={{ margin: 0, fontSize: '1.25rem', color: '#1e293b', fontWeight: '700' }}>
-                {activeModal === 'food_type' && 'Filter by Food Type'}
+                {activeModal === 'foods' && 'Filter by Foods'}
                 {activeModal === 'diet_type' && 'Filter by Diet Type'}
                 {activeModal === 'size' && 'Indicate Food Size Type'}
-                {activeModal === 'foods' && 'Search Foods'}
+                {activeModal === 'food_list' && 'Search Foods'}
                 {activeModal === 'vitamins' && 'Search Vitamins'}
                 {activeModal === 'minerals' && 'Search Minerals'}
                 {activeModal === 'daily_food' && 'Daily Food Diary'}
@@ -749,7 +756,7 @@ function App() {
 
             <div className="modal-body">
               {/* Food Type Filter UI */}
-              {activeModal === 'food_type' && (
+              {activeModal === 'foods' && (
                 <ul className="grid-list single-col">
                   {FOOD_TYPES.map(type => (
                     <li
@@ -792,7 +799,7 @@ function App() {
               )}
 
               {/* Search Foods UI */}
-              {activeModal === 'foods' && (
+              {activeModal === 'food_list' && (
                 <div className="food-search-container">
                   <input
                     type="text"
@@ -1050,7 +1057,7 @@ function App() {
               <ul style={{ margin: 0, paddingLeft: '20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 <li>For tap water write <strong>'Beverages, water, tap, drinking'</strong> (e.g. <em>1 liter of Beverages, water, tap, drinking</em>).</li>
                 <li>For bottle water write <strong>'Water, bottled, non-carbonated, naya'</strong> (e.g. <em>1 Water, bottled, non-carbonated, naya</em>).</li>
-                <li>If there is any other ingredient that is not matching your request, first check the name in the <strong>Search 'Foods'</strong> menu.</li>
+                <li>If there is any other ingredient that is not matching your request, first check the name in the <strong>Search 'Food List'</strong> menu.</li>
               </ul>
             </div>
           </div>

@@ -10,6 +10,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "html2canvas": "^1.4.1",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.8",
     "lucide-react": "^1.11.0",
     "plotly.js": "^3.5.0",
     "plotly.js-dist": "^3.5.0",
